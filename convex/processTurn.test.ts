@@ -28,12 +28,21 @@ async function setupCampaign(t: ReturnType<typeof convexTest>) {
   });
 }
 
-// Mock fetch: LLM sempre retorna conteúdo fixo "Resposta do GM."
-function mockLlmFetch(llmContent: string = "Resposta do GM.") {
-  return vi.fn().mockResolvedValue({
-    json: async () => ({
-      choices: [{ message: { content: llmContent } }],
-    }),
+// Helper para criar SSE stream a partir de chunks de texto
+function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: chunk } }] })}\n\n`
+          )
+        );
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
   });
 }
 
@@ -49,12 +58,23 @@ describe("processTurn (legado — args sem clientMessageId)", () => {
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
-      if (callCount % 2 === 1) {
-        return { json: async () => ({ choices: [{ message: { content: "Resposta do GM." } }] }) };
-      } else {
+      if (callCount === 1) {
+        // LLM streaming
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      } else if (callCount === 2) {
+        // antiLeak — não vazou
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // factExtraction
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
           }),
         };
       }
@@ -85,15 +105,31 @@ describe("processTurn (legado — args sem clientMessageId)", () => {
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
-      if (callCount % 2 === 1) {
-        return { json: async () => ({ choices: [{ message: { content: "Resposta do GM." } }] }) };
-      } else {
-        // antileak: primeiras 2 vazam, 3ª não
-        const antiLeakCall = Math.floor(callCount / 2); // 1, 2, 3...
-        const vazou = antiLeakCall < 3;
+      // Sequência: LLM(1), antiLeak(2), LLM(3), antiLeak(4), LLM(5), antiLeak(6), factExtraction(7)
+      if (callCount === 1 || callCount === 3 || callCount === 5) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      } else if (callCount === 2 || callCount === 4) {
+        // antileak: primeiras 2 vazam
         return {
+          ok: true,
           json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou, facts: vazou ? ["fact_001"] : [], trechos: vazou ? ["trecho"] : [] }) } }],
+            choices: [{ message: { content: JSON.stringify({ vazou: true, facts: ["fact_001"], trechos: ["trecho"] }) } }],
+          }),
+        };
+      } else if (callCount === 6) {
+        // antiLeak da 3ª tentativa — não vaza
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // factExtraction
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
           }),
         };
       }
@@ -125,21 +161,16 @@ describe("processTurn (legado — args sem clientMessageId)", () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    // fetch: primeiro responde ao LLM (3 vezes) e às 3 chamadas do validateAntiLeak
-    // Para simplificar, usamos uma fila de respostas
     let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string) => {
       callCount++;
-      // Chamadas LLM (geracao de conteudo GM) — identificadas pela URL do OpenRouter
-      // e chamadas validateAntiLeak (também OpenRouter)
-      // Ambas passam pelo mesmo fetch; alternamos: LLM, antileak, LLM, antileak, LLM, antileak
-      // Posições ímpares = LLM response, pares = antileak response (sempre vazou: true)
-      if (callCount % 2 === 1) {
-        // LLM gerando resposta GM
-        return { json: async () => ({ choices: [{ message: { content: "Resposta do GM." } }] }) };
+      if (callCount === 1 || callCount === 3 || callCount === 5) {
+        // LLM gerando resposta GM (streaming)
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
       } else {
         // validateAntiLeak — sempre vaza
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: true, facts: ["fact_001"], trechos: ["trecho"] }) } }],
           }),
@@ -177,16 +208,16 @@ describe("processTurn (K1 — estágios com clientMessageId)", () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    // fetch alternado: chamadas ímpares = LLM GM, pares = antiLeak (sem vazamento), resto = factExtraction
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        // Estágio 2: LLM gera resposta GM
-        return { json: async () => ({ choices: [{ message: { content: "O rei está no castelo ao norte." } }] }) };
+        // Estágio 2: LLM gera resposta GM (streaming)
+        return { ok: true, body: makeSseStream(["O rei está no castelo ao norte."]) };
       } else if (callCount === 2) {
         // Estágio 4: antiLeak — não vazou
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
@@ -194,6 +225,7 @@ describe("processTurn (K1 — estágios com clientMessageId)", () => {
       } else {
         // Estágio 6: extractAndPersistFacts
         return {
+          ok: true,
           json: async () => ({
             choices: [{
               message: {
@@ -244,11 +276,12 @@ describe("processTurn (K1 — estágios com clientMessageId)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        // Estágio 2: LLM gera resposta GM
-        return { json: async () => ({ choices: [{ message: { content: "Conteúdo parcial do GM." } }] }) };
+        // Estágio 2: LLM gera resposta GM (streaming)
+        return { ok: true, body: makeSseStream(["Conteúdo parcial do GM."]) };
       } else if (callCount === 2) {
         // Estágio 4: antiLeak — não vazou
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
@@ -307,11 +340,12 @@ describe("processTurn (K2 — tool calls)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        // Estágio 2: LLM retorna tool call
-        return { json: async () => ({ choices: [{ message: { content: toolCallPayload } }] }) };
+        // Estágio 2: LLM retorna tool call (streaming)
+        return { ok: true, body: makeSseStream([toolCallPayload]) };
       } else if (callCount === 2) {
         // Estágio 4: antiLeak — não vazou
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
@@ -319,6 +353,7 @@ describe("processTurn (K2 — tool calls)", () => {
       } else {
         // Estágio 6: extractAndPersistFacts
         return {
+          ok: true,
           json: async () => ({
             choices: [{
               message: {
@@ -361,15 +396,17 @@ describe("processTurn (K2 — tool calls)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        return { json: async () => ({ choices: [{ message: { content: "Texto simples do GM." } }] }) };
+        return { ok: true, body: makeSseStream(["Texto simples do GM."]) };
       } else if (callCount === 2) {
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
         };
       } else {
         return {
+          ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
           }),
@@ -396,6 +433,137 @@ describe("processTurn (K2 — tool calls)", () => {
       const toolCalls = (msg as any)!.toolCalls;
       expect(toolCalls === undefined || toolCalls === null || toolCalls.length === 0).toBe(true);
     });
+  });
+});
+
+describe("processTurn (streaming — G-002)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("HP1: stream de 3 chunks → mensagem GM final tem conteúdo acumulado e status complete", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // LLM streaming
+        return { ok: true, body: makeSseStream(["Olá ", "mundo", "!"]) };
+      } else if (callCount === 2) {
+        // antiLeak
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // factExtraction
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-g002-hp1",
+      hiddenFacts: [],
+      playerMessageContent: "Olá!",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.content).toBe("Olá mundo!");
+      expect((msg as any)!.status).toBe("complete");
+    });
+  });
+
+  it("HP2: stream com chunk de 250 chars → conteúdo final correto no banco", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    const bigChunk = "a".repeat(250);
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { ok: true, body: makeSseStream([bigChunk]) };
+      } else if (callCount === 2) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-g002-hp2",
+      hiddenFacts: [],
+      playerMessageContent: "Texto longo!",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.content).toBe(bigChunk);
+    });
+  });
+
+  it("EC1: fetch retorna ok: false (429) → processTurn retorna failure ou lança erro", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 429,
+      text: async () => "Too Many Requests",
+    }));
+
+    let thrown = false;
+    let result: unknown;
+    try {
+      result = await t.action(internal.processTurn.processTurn, {
+        campaignId,
+        clientMessageId: "player-msg-g002-ec1",
+        hiddenFacts: [],
+        playerMessageContent: "Qualquer coisa",
+        antiLeakValidationEnabled: false,
+      });
+    } catch {
+      thrown = true;
+    }
+
+    // Aceita tanto lançar erro quanto retornar { success: false }
+    if (!thrown) {
+      expect(result).toMatchObject({ success: false });
+    } else {
+      expect(thrown).toBe(true);
+    }
   });
 });
 
@@ -464,7 +632,8 @@ describe("processTurn (K3 — compel_aspect)", () => {
     });
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      json: async () => ({ choices: [{ message: { content: compelPayload } }] }),
+      ok: true,
+      body: makeSseStream([compelPayload]),
     }));
 
     const result = await t.action(internal.processTurn.processTurn, {

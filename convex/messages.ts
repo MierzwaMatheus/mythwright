@@ -89,6 +89,19 @@ export const appendToolCall = mutation({
   },
 });
 
+export const getMessageContent = query({
+  args: {
+    messageId: v.id("messages"),
+  },
+  handler: async (ctx, args): Promise<string> => {
+    const message = await ctx.db.get(args.messageId);
+    if (message === null) {
+      throw new Error(`Message not found: ${args.messageId}`);
+    }
+    return message.content;
+  },
+});
+
 export const appendMessageTokens = mutation({
   args: {
     messageId: v.id("messages"),

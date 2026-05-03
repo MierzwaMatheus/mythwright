@@ -99,9 +99,9 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/02-technical-architecture.md` §3.4 (Estágio 4 — geração com streaming) e `@docs/01-gap-report.md` G-002
 
-- [ ] Implementar fetch com `stream: true` e leitura de SSE em `convex/processTurn.ts`
-- [ ] Persistir tokens incrementalmente via `messages.appendMessageTokens` (já existe em `convex/messages.ts`) a cada batch de N tokens ou N ms
-- [ ] Testar streaming com mock de SSE — verificar que tokens chegam na order correta em `messages`
+- [x] Implementar fetch com `stream: true` e leitura de SSE em `convex/processTurn.ts`
+- [x] Persistir tokens incrementalmente via `messages.appendMessageTokens` (já existe em `convex/messages.ts`) a cada batch de N tokens ou N ms
+- [x] Testar streaming com mock de SSE — verificar que tokens chegam na order correta em `messages`
 
 ### Tool Calling Real — G-003
 

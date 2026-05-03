@@ -29,6 +29,7 @@ import type * as processTurn from "../processTurn.js";
 import type * as prompts_antiLeak from "../prompts/antiLeak.js";
 import type * as prompts_arcSummarizer from "../prompts/arcSummarizer.js";
 import type * as prompts_factExtraction from "../prompts/factExtraction.js";
+import type * as prompts_gmSystemPrompt from "../prompts/gmSystemPrompt.js";
 import type * as prompts_sceneSummarizer from "../prompts/sceneSummarizer.js";
 import type * as prompts_triggerClassifier from "../prompts/triggerClassifier.js";
 import type * as sceneAspects from "../sceneAspects.js";
@@ -68,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   "prompts/antiLeak": typeof prompts_antiLeak;
   "prompts/arcSummarizer": typeof prompts_arcSummarizer;
   "prompts/factExtraction": typeof prompts_factExtraction;
+  "prompts/gmSystemPrompt": typeof prompts_gmSystemPrompt;
   "prompts/sceneSummarizer": typeof prompts_sceneSummarizer;
   "prompts/triggerClassifier": typeof prompts_triggerClassifier;
   sceneAspects: typeof sceneAspects;
