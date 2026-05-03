@@ -212,6 +212,8 @@ export const processTurnFull = internalAction({
                 aspectId: params.aspectId,
                 characterId: params.characterId,
                 complication: params.complication,
+                triggeringMessageId: args.playerMessageId,
+                pausedGmMessageId: gmMessageId,
               }
             );
             await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
@@ -335,5 +337,162 @@ export const processTurnFull = internalAction({
     }
 
     return { success: false, reason: "max_regenerations_exceeded" };
+  },
+});
+
+export const continueAfterCompel = internalAction({
+  args: {
+    playerMessageId: v.id("messages"),
+    gmMessageId: v.id("messages"),
+    compelId: v.id("compels"),
+    antiLeakValidationEnabled: v.optional(v.boolean()),
+    // Optional pre-fetched compel data (used when called from scheduler to avoid runQuery bug in convex-test)
+    _compelStatus: v.optional(v.union(v.literal("accepted"), v.literal("refused"), v.literal("pending"))),
+    _compelComplication: v.optional(v.string()),
+    _compelCampaignId: v.optional(v.id("campaigns")),
+  },
+  handler: async (ctx, args): Promise<
+    | { success: true; messageId: Id<"messages"> }
+    | { success: false; reason: string }
+  > => {
+    // 1. Buscar compel (ou usar dados pré-carregados para evitar runQuery em scheduled context)
+    let compel: { status: string; complication: string; campaignId: Id<"campaigns"> } | null = null;
+    if (args._compelStatus && args._compelComplication && args._compelCampaignId) {
+      compel = {
+        status: args._compelStatus,
+        complication: args._compelComplication,
+        campaignId: args._compelCampaignId,
+      };
+    } else {
+      try {
+        compel = await ctx.runQuery(internal.compels.getById, { compelId: args.compelId });
+      } catch (e) {
+        return { success: false, reason: "compel_not_found" };
+      }
+    }
+    if (!compel) return { success: false, reason: "compel_not_found" };
+
+    // 2. Append compel_resolution tool call na gmMessage
+    try {
+      await ctx.runMutation(api.messages.appendToolCall, {
+        messageId: args.gmMessageId,
+        toolName: "compel_resolution",
+        toolParams: { compelId: args.compelId },
+        toolResult: {
+          decision: compel.status,
+          fatePointDelta: compel.status === "accepted" ? +1 : -1,
+        },
+      });
+    } catch (e) {
+      console.error("continueAfterCompel: appendToolCall failed:", e);
+      // Non-fatal: continue without appending tool call
+    }
+
+    // 3. Buscar dados base
+    const [playerMessage, campaign] = await Promise.all([
+      ctx.runQuery(internal.messages.getByIdInternal, { messageId: args.playerMessageId }),
+      ctx.runQuery(internal.campaigns.getByIdInternal, { campaignId: compel.campaignId }),
+    ]);
+
+    if (!playerMessage) return { success: false, reason: "player_message_not_found" };
+    if (!campaign) return { success: false, reason: "campaign_not_found" };
+
+    const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
+      campaignId: compel.campaignId,
+    });
+
+    const systemPrompt = buildGmSystemPrompt({ tone: campaign.tone, premise: campaign.premise });
+
+    // 4. Montar mensagens para LLM incluindo decisão do compel
+    const compelContext = compel.status === "accepted"
+      ? `O jogador ACEITOU o compel "${compel.complication}". Continue a narrativa com essa complicação.`
+      : `O jogador RECUSOU o compel "${compel.complication}" gastando um Ponto de Destino. Continue sem essa complicação.`;
+
+    const llmMessages: Array<{ role: string; content: string }> = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: playerMessage.content },
+      { role: "assistant", content: `[Compel proposto: ${compel.complication}]` },
+      { role: "user", content: compelContext },
+    ];
+
+    // 5. Streaming
+    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
+    let pendingBuffer = "";
+    let fullText = "";
+    let lastFlushAt = Date.now();
+
+    for await (const event of parseStreamingResponse(streamBody)) {
+      if (event.type === "text_delta") {
+        pendingBuffer += event.delta;
+        fullText += event.delta;
+        const now = Date.now();
+        if (pendingBuffer.length >= FLUSH_CHAR_THRESHOLD || now - lastFlushAt >= FLUSH_MS_THRESHOLD) {
+          await ctx.runMutation(api.messages.appendMessageTokens, {
+            messageId: args.gmMessageId,
+            tokens: pendingBuffer,
+          });
+          pendingBuffer = "";
+          lastFlushAt = Date.now();
+        }
+      }
+    }
+
+    if (pendingBuffer.length > 0) {
+      await ctx.runMutation(api.messages.appendMessageTokens, {
+        messageId: args.gmMessageId,
+        tokens: pendingBuffer,
+      });
+    }
+
+    // 6. Persistir conteúdo final
+    await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
+      messageId: args.gmMessageId,
+      content: fullText,
+    });
+
+    // 7. AntiLeak + extração de fatos + finalização
+    const antiLeakEnabled = args.antiLeakValidationEnabled === true;
+    if (!antiLeakEnabled) {
+      await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+        gmMessageId: args.gmMessageId,
+        triggersFired: [],
+        factsRevealed: [],
+      });
+      return { success: true, messageId: args.gmMessageId };
+    }
+
+    const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
+      messageId: args.gmMessageId,
+      campaignId: compel.campaignId,
+      hiddenFacts: [],
+    });
+
+    if (!leakResult.vazou) {
+      try {
+        await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+          messageId: args.gmMessageId,
+          campaignId: compel.campaignId,
+        });
+      } catch {
+        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+          messageId: args.gmMessageId,
+          status: "failed",
+        });
+        return { success: false, reason: "fact_extraction_failed" };
+      }
+
+      await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+        gmMessageId: args.gmMessageId,
+        triggersFired: [],
+        factsRevealed: [],
+      });
+      return { success: true, messageId: args.gmMessageId };
+    }
+
+    await ctx.runMutation(internal.processTurn.markMessageStatus, {
+      messageId: args.gmMessageId,
+      status: "failed",
+    });
+    return { success: false, reason: "anti_leak_failed" };
   },
 });

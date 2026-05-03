@@ -1,8 +1,22 @@
 import { ConvexError, v } from "convex/values";
-import { internalMutation, mutation, MutationCtx } from "./_generated/server";
+import { internalMutation, internalQuery, mutation, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+
+export const getById = internalQuery({
+  args: { compelId: v.id("compels") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.compelId);
+  },
+});
+
+export const getByIdMutation = internalMutation({
+  args: { compelId: v.id("compels") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.compelId);
+  },
+});
 
 async function assertCampaignOwnership(
   ctx: MutationCtx,
@@ -21,6 +35,8 @@ export const beginCompelInternal = internalMutation({
     aspectId: v.id("sceneAspects"),
     characterId: v.id("characters"),
     complication: v.string(),
+    triggeringMessageId: v.optional(v.id("messages")),
+    pausedGmMessageId: v.optional(v.id("messages")),
   },
   handler: async (ctx, args): Promise<Id<"compels">> => {
     return await ctx.db.insert("compels", {
@@ -30,6 +46,8 @@ export const beginCompelInternal = internalMutation({
       complication: args.complication,
       status: "pending",
       createdAt: Date.now(),
+      ...(args.triggeringMessageId !== undefined ? { triggeringMessageId: args.triggeringMessageId } : {}),
+      ...(args.pausedGmMessageId !== undefined ? { pausedGmMessageId: args.pausedGmMessageId } : {}),
     });
   },
 });
@@ -80,6 +98,19 @@ export const resolveCompel = mutation({
         reason: "Recusa de compel",
       });
       await ctx.db.patch(args.compelId, { status: "refused", resolvedAt: Date.now() });
+    }
+
+    if (compel.triggeringMessageId && compel.pausedGmMessageId) {
+      const resolvedStatus = args.decision === "accept" ? "accepted" : "refused";
+      await ctx.scheduler.runAfter(0, internal.processTurnFull.continueAfterCompel, {
+        playerMessageId: compel.triggeringMessageId,
+        gmMessageId: compel.pausedGmMessageId,
+        compelId: args.compelId,
+        antiLeakValidationEnabled: false,
+        _compelStatus: resolvedStatus,
+        _compelComplication: compel.complication,
+        _compelCampaignId: compel.campaignId,
+      });
     }
   },
 });

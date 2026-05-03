@@ -136,9 +136,9 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/02-technical-architecture.md` §6.5 (orquestração de compel) e `@docs/01-gap-report.md` G-014
 
-- [ ] Implementar `internalAction continueAfterCompel(playerMessageId)` que monta contexto com resultado do compel e retoma geração
-- [ ] Modificar `compels.resolveCompel` para agendar `continueAfterCompel` após persistir a resolução
-- [ ] Testar fluxo completo: compel detectado → `awaiting_player_decision` → jogador resolve → continuação gera resto da resposta
+- [x] Implementar `internalAction continueAfterCompel(playerMessageId)` que monta contexto com resultado do compel e retoma geração
+- [x] Modificar `compels.resolveCompel` para agendar `continueAfterCompel` após persistir a resolução
+- [x] Testar fluxo completo: compel detectado → `awaiting_player_decision` → jogador resolve → continuação gera resto da resposta
 
 ---
 
