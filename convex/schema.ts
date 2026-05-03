@@ -24,6 +24,8 @@ export default defineSchema({
     ),
     createdAt: v.number(),
     lastActivityAt: v.number(),
+    cheatModeEnabled: v.optional(v.boolean()),
+    antiLeakValidationEnabled: v.optional(v.boolean()),
   }).index("by_user", ["userId"])
     .index("by_user_activity", ["userId", "lastActivityAt"]),
 

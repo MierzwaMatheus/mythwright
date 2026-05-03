@@ -360,6 +360,169 @@ describe("campaigns.updateCampaignStatus", () => {
   });
 });
 
+describe("campaigns.updateCampaignConfig", () => {
+  const campaignInput = {
+    name: "Campanha de Config",
+    premise: "Premissa original.",
+    tone: "epic fantasy",
+    expectedDuration: "long" as const,
+  };
+
+  async function setupUserAndCampaign(
+    t: ReturnType<typeof convexTest>,
+    tokenIdentifier: string,
+    email: string,
+  ) {
+    const identity = t.withIdentity({ tokenIdentifier, email });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+    const campaignId = await identity.mutation(api.campaigns.createCampaign, campaignInput);
+    return { identity, campaignId: campaignId as Id<"campaigns"> };
+  }
+
+  it("atualiza apenas tone quando só tone é fornecido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg001", "cfg001@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      tone: "dark horror",
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.tone).toBe("dark horror");
+      expect(campaign!.premise).toBe("Premissa original.");
+    });
+  });
+
+  it("atualiza apenas premise quando só premise é fornecida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg002", "cfg002@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      premise: "Nova premissa.",
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.premise).toBe("Nova premissa.");
+      expect(campaign!.tone).toBe("epic fantasy");
+    });
+  });
+
+  it("atualiza cheatModeEnabled para true", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg003", "cfg003@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      cheatModeEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.cheatModeEnabled).toBe(true);
+    });
+  });
+
+  it("atualiza antiLeakValidationEnabled para false", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg004", "cfg004@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      antiLeakValidationEnabled: false,
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.antiLeakValidationEnabled).toBe(false);
+    });
+  });
+
+  it("atualiza múltiplos campos em uma chamada", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg005", "cfg005@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      tone: "comedic",
+      premise: "Aventura hilária.",
+      cheatModeEnabled: true,
+      antiLeakValidationEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.tone).toBe("comedic");
+      expect(campaign!.premise).toBe("Aventura hilária.");
+      expect(campaign!.cheatModeEnabled).toBe(true);
+      expect(campaign!.antiLeakValidationEnabled).toBe(true);
+    });
+  });
+
+  it("não altera campos não enviados", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfg006", "cfg006@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignConfig, {
+      campaignId,
+      tone: "grim",
+    });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.premise).toBe("Premissa original.");
+      expect(campaign!.name).toBe("Campanha de Config");
+      expect(campaign!.expectedDuration).toBe("long");
+      expect(campaign!.status).toBe("setup");
+    });
+  });
+
+  it("lança erro se campanha não encontrada", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|cfg007", email: "cfg007@test.com" });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+
+    const fakeId = "fake_campaign_id" as Id<"campaigns">;
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignConfig, {
+        campaignId: fakeId,
+        tone: "dark",
+      })
+    ).rejects.toThrow();
+  });
+
+  it("lança erro se não autenticado", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|cfg008", "cfg008@test.com");
+
+    await expect(
+      t.mutation(api.campaigns.updateCampaignConfig, {
+        campaignId,
+        tone: "dark",
+      })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("lança erro se campanha pertence a outro usuário", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|cfg009", "cfg009@test.com");
+
+    const other = t.withIdentity({ tokenIdentifier: "token|cfg009b", email: "cfg009b@test.com" });
+    await other.mutation(api.users.upsertFromAuth, { displayName: "Outro GM" });
+
+    await expect(
+      other.mutation(api.campaigns.updateCampaignConfig, {
+        campaignId,
+        tone: "dark",
+      })
+    ).rejects.toThrow(ConvexError);
+  });
+});
+
 describe("campaigns.deleteCampaign", () => {
   const campaignInput = {
     name: "Campanha para deletar",

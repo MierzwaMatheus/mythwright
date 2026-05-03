@@ -72,6 +72,39 @@ export const updateCampaignStatus = mutation({
   },
 });
 
+export const updateCampaignConfig = mutation({
+  args: {
+    campaignId: v.id("campaigns"),
+    tone: v.optional(v.string()),
+    premise: v.optional(v.string()),
+    cheatModeEnabled: v.optional(v.boolean()),
+    antiLeakValidationEnabled: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new ConvexError("Not authenticated");
+
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found");
+
+    if (campaign.userId !== user._id) throw new ConvexError("Unauthorized");
+
+    const patch: Partial<{
+      tone: string;
+      premise: string;
+      cheatModeEnabled: boolean;
+      antiLeakValidationEnabled: boolean;
+    }> = {};
+
+    if (args.tone !== undefined) patch.tone = args.tone;
+    if (args.premise !== undefined) patch.premise = args.premise;
+    if (args.cheatModeEnabled !== undefined) patch.cheatModeEnabled = args.cheatModeEnabled;
+    if (args.antiLeakValidationEnabled !== undefined) patch.antiLeakValidationEnabled = args.antiLeakValidationEnabled;
+
+    await ctx.db.patch(args.campaignId, patch);
+  },
+});
+
 const CHILD_TABLES = [
   "characters",
   "scenes",
