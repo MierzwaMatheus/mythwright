@@ -398,3 +398,116 @@ describe("processTurn (K2 — tool calls)", () => {
     });
   });
 });
+
+describe("processTurn (K3 — compel_aspect)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  async function setupCampaignWithSceneAndAspect(t: ReturnType<typeof convexTest>) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "k3@test.com",
+        displayName: "K3 User",
+        tokenIdentifier: "token|k3-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "K3 Campaign",
+        premise: "Compel test.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const characterId = await ctx.db.insert("characters", {
+        campaignId,
+        name: "Hero",
+        aspects: ["Dívida com o demônio"],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false], mental: [false, false] },
+        consequences: [],
+      });
+      const sceneId = await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena 1",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const aspectId = await ctx.db.insert("sceneAspects", {
+        sceneId,
+        text: "Dívida com o demônio",
+        freeInvokes: 0,
+      });
+      return { campaignId, characterId, aspectId };
+    });
+  }
+
+  it("HP1: tool call compel_aspect → retorna awaiting_player_decision com compelId válido", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, characterId, aspectId } = await setupCampaignWithSceneAndAspect(t);
+
+    const compelPayload = JSON.stringify({
+      type: "tool_call",
+      textBefore: "Seu aspecto 'Dívida com o demônio' complica as coisas...",
+      toolName: "compel_aspect",
+      toolParams: {
+        aspectId,
+        characterId,
+        complication: "O demônio aparece e exige pagamento agora.",
+      },
+      toolResult: null,
+      textAfter: "",
+    });
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      json: async () => ({ choices: [{ message: { content: compelPayload } }] }),
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-k3-001",
+      hiddenFacts: [],
+      playerMessageContent: "O que acontece?",
+      antiLeakValidationEnabled: false,
+    });
+
+    expect(result).toMatchObject({ status: "awaiting_player_decision" });
+    const r = result as { status: "awaiting_player_decision"; compelId: string; messageId: string };
+    expect(r.compelId).toBeDefined();
+    expect(r.messageId).toBeDefined();
+
+    await t.run(async (ctx) => {
+      const compel = await ctx.db.get(r.compelId as any);
+      expect(compel).not.toBeNull();
+      expect((compel as any)!.status).toBe("pending");
+      expect((compel as any)!.characterId).toBe(characterId);
+      expect((compel as any)!.aspectId).toBe(aspectId);
+    });
+  });
+
+  it("HP2: após compel pending, resolveCompelInternal com accept → status accepted", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, characterId, aspectId } = await setupCampaignWithSceneAndAspect(t);
+
+    const compelId = await t.mutation(internal.compels.beginCompelInternal, {
+      campaignId,
+      aspectId,
+      characterId,
+      complication: "O demônio aparece e exige pagamento agora.",
+    });
+
+    await t.mutation(internal.compels.resolveCompelInternal, {
+      compelId,
+      decision: "accept",
+    });
+
+    await t.run(async (ctx) => {
+      const compel = await ctx.db.get(compelId as any);
+      expect((compel as any)!.status).toBe("accepted");
+    });
+  });
+});

@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 import { api } from "./_generated/api";
@@ -14,6 +14,43 @@ async function assertCampaignOwnership(
   if (campaign.userId !== userId) throw new ConvexError("Unauthorized");
   return campaign;
 }
+
+export const beginCompelInternal = internalMutation({
+  args: {
+    campaignId: v.id("campaigns"),
+    aspectId: v.id("sceneAspects"),
+    characterId: v.id("characters"),
+    complication: v.string(),
+  },
+  handler: async (ctx, args): Promise<Id<"compels">> => {
+    return await ctx.db.insert("compels", {
+      campaignId: args.campaignId,
+      aspectId: args.aspectId,
+      characterId: args.characterId,
+      complication: args.complication,
+      status: "pending",
+      createdAt: Date.now(),
+    });
+  },
+});
+
+export const resolveCompelInternal = internalMutation({
+  args: {
+    compelId: v.id("compels"),
+    decision: v.union(v.literal("accept"), v.literal("refuse")),
+  },
+  handler: async (ctx, args) => {
+    const compel = await ctx.db.get(args.compelId);
+    if (!compel) throw new ConvexError("Compel not found");
+    if (compel.status !== "pending") throw new ConvexError("Compel já resolvido");
+
+    if (args.decision === "accept") {
+      await ctx.db.patch(args.compelId, { status: "accepted", resolvedAt: Date.now() });
+    } else {
+      await ctx.db.patch(args.compelId, { status: "refused", resolvedAt: Date.now() });
+    }
+  },
+});
 
 export const resolveCompel = mutation({
   args: {

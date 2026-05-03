@@ -97,10 +97,31 @@ export const processTurn = internalAction({
     playerMessageContent: v.string(),
     antiLeakValidationEnabled: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<{ success: true; messageId: Id<"messages"> } | { success: false; reason: string }> => {
+  handler: async (ctx, args): Promise<
+    | { success: true; messageId: Id<"messages"> }
+    | { success: false; reason: string }
+    | { status: "awaiting_player_decision"; compelId: Id<"compels">; messageId: Id<"messages"> }
+  > => {
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
       const rawLlmContent = await callLlm(args.playerMessageContent);
       const { content: gmContent, toolCalls } = parseLlmResponse(rawLlmContent);
+
+      // Detectar compel_aspect antes de persistir a mensagem normalmente
+      if (toolCalls && toolCalls.length > 0 && toolCalls[0].toolName === "compel_aspect") {
+        const params = toolCalls[0].toolParams as { aspectId: Id<"sceneAspects">; characterId: Id<"characters">; complication: string };
+        const messageId: Id<"messages"> = await ctx.runMutation(internal.processTurn.createGmMessage, {
+          campaignId: args.campaignId,
+          content: gmContent,
+          toolCalls,
+        });
+        const compelId: Id<"compels"> = await ctx.runMutation(internal.compels.beginCompelInternal, {
+          campaignId: args.campaignId,
+          aspectId: params.aspectId,
+          characterId: params.characterId,
+          complication: params.complication,
+        });
+        return { status: "awaiting_player_decision", compelId, messageId };
+      }
 
       const messageId: Id<"messages"> = await ctx.runMutation(internal.processTurn.createGmMessage, {
         campaignId: args.campaignId,
