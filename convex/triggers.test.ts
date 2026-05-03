@@ -252,6 +252,55 @@ describe("triggers.resolveTriggerEffects", () => {
       expect(trigger!.firedAt).toBeTypeOf("number");
     });
   });
+  it("ignora silenciosamente trigger com status fired (idempotencia)", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|rte004", "rte004@test.com");
+
+    const factId = await identity.mutation(api.facts.createFact, {
+      campaignId,
+      content: "O rei é um traidor.",
+      visibility: "hidden",
+    });
+
+    const triggerId = await identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: "Revelar o fato quando o rei for mencionado.",
+      scope: "global",
+      effects: [
+        {
+          type: "change_fact_visibility",
+          payload: { factId, visibility: "known" },
+        },
+      ],
+    });
+
+    // Primeira chamada: executa o efeito e marca como fired
+    await identity.action(api.triggers.resolveTriggerEffects, {
+      triggeredIds: [triggerId as Id<"triggers">],
+    });
+
+    // Reverter manualmente a visibility para detectar se o efeito re-executar
+    await t.run(async (ctx) => {
+      await ctx.db.patch(factId as Id<"facts">, { visibility: "hidden" });
+    });
+
+    // Segunda chamada com o mesmo triggerId (já fired) — deve ser ignorada
+    await identity.action(api.triggers.resolveTriggerEffects, {
+      triggeredIds: [triggerId as Id<"triggers">],
+    });
+
+    await t.run(async (ctx) => {
+      // Se o efeito foi re-executado, visibility voltaria a "known"
+      // O comportamento correto é permanecer "hidden" (efeito ignorado)
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("hidden");
+
+      // Trigger deve continuar fired, sem erro
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("fired");
+    });
+  });
+
   it("executa multiplos efeitos em sequencia e marca trigger como fired", async () => {
     const t = convexTest(schema, modules);
     const { identity, campaignId } = await setupUserAndCampaign(t, "token|rte003", "rte003@test.com");

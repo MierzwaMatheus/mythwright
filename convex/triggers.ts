@@ -77,6 +77,7 @@ export const resolveTriggerEffects = action({
       );
 
       if (!trigger) continue;
+      if (trigger.status === "fired") continue;
 
       for (const effect of trigger.effects) {
         if (effect.type === "change_fact_visibility") {
