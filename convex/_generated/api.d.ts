@@ -22,6 +22,7 @@ import type * as lib_tokenCounter from "../lib/tokenCounter.js";
 import type * as messages from "../messages.js";
 import type * as processTurn from "../processTurn.js";
 import type * as prompts_antiLeak from "../prompts/antiLeak.js";
+import type * as prompts_factExtraction from "../prompts/factExtraction.js";
 import type * as sceneAspects from "../sceneAspects.js";
 import type * as scenes from "../scenes.js";
 import type * as stress from "../stress.js";
@@ -49,6 +50,7 @@ declare const fullApi: ApiFromModules<{
   messages: typeof messages;
   processTurn: typeof processTurn;
   "prompts/antiLeak": typeof prompts_antiLeak;
+  "prompts/factExtraction": typeof prompts_factExtraction;
   sceneAspects: typeof sceneAspects;
   scenes: typeof scenes;
   stress: typeof stress;
