@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildFactExtractionPrompt, parseFactExtractionResponse } from "./factExtraction";
+import { buildFactExtractionPrompt, parseFactExtractionResponse, deduplicateFacts } from "./factExtraction";
 
 describe("buildFactExtractionPrompt", () => {
   const gmResponse = "O cavaleiro encontrou uma caverna escondida ao norte da floresta.";
@@ -128,5 +128,75 @@ describe("parseFactExtractionResponse", () => {
     const raw = JSON.stringify({ facts: [] });
 
     expect(parseFactExtractionResponse(raw)).toEqual([]);
+  });
+});
+
+describe("deduplicateFacts", () => {
+  it("descarta duplicata óbvia idêntica", () => {
+    const newFacts = [{ content: "O rei morreu na batalha." }];
+    const existingFacts = [{ content: "O rei morreu na batalha." }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("descarta variação de capitalização", () => {
+    const newFacts = [{ content: "O Rei Morreu Na Batalha." }];
+    const existingFacts = [{ content: "o rei morreu na batalha." }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("mantém fato genuinamente distinto", () => {
+    const newFacts = [{ content: "A rainha fugiu para o norte." }];
+    const existingFacts = [{ content: "O rei morreu na batalha." }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("A rainha fugiu para o norte.");
+  });
+
+  it("descarta variação com pontuação", () => {
+    const newFacts = [{ content: "O rei, morreu!" }];
+    const existingFacts = [{ content: "o rei morreu" }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("retorna todos os newFacts quando existingFacts é vazio", () => {
+    const newFacts = [
+      { content: "O rei morreu na batalha." },
+      { content: "A rainha fugiu para o norte." },
+    ];
+    const existingFacts: Array<{ content: string }> = [];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("retorna vazio quando newFacts é vazio", () => {
+    const newFacts: Array<{ content: string }> = [];
+    const existingFacts = [{ content: "O rei morreu na batalha." }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(0);
+  });
+
+  it("mantém fato quase igual mas com palavra diferente importante", () => {
+    const newFacts = [{ content: "O rei viveu na batalha." }];
+    const existingFacts = [{ content: "O rei morreu na batalha." }];
+
+    const result = deduplicateFacts(newFacts, existingFacts);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].content).toBe("O rei viveu na batalha.");
   });
 });

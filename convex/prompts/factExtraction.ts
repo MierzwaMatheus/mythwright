@@ -1,5 +1,32 @@
 const VALID_VISIBILITIES = new Set(["hidden", "rumored", "known"]);
 
+function normalize(content: string): string {
+  return content.toLowerCase().replace(/[^\w\s]/g, "");
+}
+
+function tokenize(content: string): Set<string> {
+  return new Set(normalize(content).split(/\s+/).filter(Boolean));
+}
+
+function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
+  const intersection = new Set([...a].filter((w) => b.has(w)));
+  const union = new Set([...a, ...b]);
+  if (union.size === 0) return 1;
+  return intersection.size / union.size;
+}
+
+export function deduplicateFacts(
+  newFacts: Array<{ content: string }>,
+  existingFacts: Array<{ content: string }>
+): Array<{ content: string }> {
+  const existingTokens = existingFacts.map((f) => tokenize(f.content));
+
+  return newFacts.filter((newFact) => {
+    const newTokens = tokenize(newFact.content);
+    return !existingTokens.some((et) => jaccardSimilarity(newTokens, et) > 0.8);
+  });
+}
+
 export function parseFactExtractionResponse(rawResponse: string): Array<{
   content: string;
   visibility: "hidden" | "rumored" | "known";
