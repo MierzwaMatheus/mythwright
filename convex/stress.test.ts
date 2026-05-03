@@ -8,6 +8,36 @@ import { ConvexError } from "convex/values";
 
 const modules = import.meta.glob("./**/*.ts");
 
+async function setupCharacterWithConsequences(
+  t: ReturnType<typeof convexTest>,
+  consequences: Array<{ severity: "mild" | "moderate" | "severe"; description: string }>,
+) {
+  const identity = t.withIdentity({ tokenIdentifier: "token|cons001", email: "cons001@test.com" });
+  await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+  const campaignId = await identity.mutation(api.campaigns.createCampaign, {
+    name: "Test",
+    premise: "Test",
+    tone: "dark",
+    expectedDuration: "medium",
+  });
+  const characterId = await identity.mutation(api.characters.createCharacter, {
+    campaignId,
+    name: "Hero",
+    aspects: [],
+    skills: {},
+    stunts: [],
+    stress: { physical: [false, false, false], mental: [false, false] },
+  });
+
+  if (consequences.length > 0) {
+    await t.run(async (ctx) => {
+      await ctx.db.patch(characterId as Id<"characters">, { consequences });
+    });
+  }
+
+  return { identity, campaignId: campaignId as Id<"campaigns">, characterId: characterId as Id<"characters"> };
+}
+
 async function setupCharacterWithStress(
   t: ReturnType<typeof convexTest>,
   track: "physical" | "mental",
@@ -138,5 +168,89 @@ describe("stress.applyStress", () => {
         amount: 1,
       }),
     ).rejects.toThrow(ConvexError);
+  });
+});
+
+describe("stress.applyConsequence", () => {
+  it("slot mild vazio — persiste e retorna absorbed: 2", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, characterId } = await setupCharacterWithConsequences(t, []);
+
+    const result = await identity.mutation(api.stress.applyConsequence, {
+      characterId,
+      severity: "mild",
+      description: "Tornozelinho torcido",
+    });
+
+    expect(result).toEqual({ absorbed: 2 });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId);
+      expect(character!.consequences).toContainEqual({
+        severity: "mild",
+        description: "Tornozelinho torcido",
+      });
+    });
+  });
+
+  it("slot moderate vazio — retorna absorbed: 4", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, characterId } = await setupCharacterWithConsequences(t, []);
+
+    const result = await identity.mutation(api.stress.applyConsequence, {
+      characterId,
+      severity: "moderate",
+      description: "Braço quebrado",
+    });
+
+    expect(result).toEqual({ absorbed: 4 });
+  });
+
+  it("slot severe vazio — retorna absorbed: 6", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, characterId } = await setupCharacterWithConsequences(t, []);
+
+    const result = await identity.mutation(api.stress.applyConsequence, {
+      characterId,
+      severity: "severe",
+      description: "Ferimento gravíssimo",
+    });
+
+    expect(result).toEqual({ absorbed: 6 });
+  });
+
+  it("slot ocupado — lança ConvexError com mensagem descritiva", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, characterId } = await setupCharacterWithConsequences(t, [
+      { severity: "mild", description: "Já existe" },
+    ]);
+
+    await expect(
+      identity.mutation(api.stress.applyConsequence, {
+        characterId,
+        severity: "mild",
+        description: "Segunda mild",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("múltiplas severities coexistem — mild e moderate ao mesmo tempo", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, characterId } = await setupCharacterWithConsequences(t, [
+      { severity: "mild", description: "Mild existente" },
+    ]);
+
+    await identity.mutation(api.stress.applyConsequence, {
+      characterId,
+      severity: "moderate",
+      description: "Moderate novo",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId);
+      expect(character!.consequences).toHaveLength(2);
+      expect(character!.consequences).toContainEqual({ severity: "mild", description: "Mild existente" });
+      expect(character!.consequences).toContainEqual({ severity: "moderate", description: "Moderate novo" });
+    });
   });
 });
