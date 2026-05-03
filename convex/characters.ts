@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, MutationCtx } from "./_generated/server";
+import { mutation, query, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 
@@ -13,6 +13,29 @@ async function assertCampaignOwnership(
   if (campaign.userId !== userId) throw new ConvexError("Unauthorized");
   return campaign;
 }
+
+export const getCharacterHistory = query({
+  args: {
+    characterId: v.id("characters"),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new ConvexError("Not authenticated");
+
+    const character = await ctx.db.get(args.characterId);
+    if (!character) throw new ConvexError("Character not found");
+
+    const campaign = await ctx.db.get(character.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found");
+    if (campaign.userId !== user._id) throw new ConvexError("Unauthorized");
+
+    return await ctx.db
+      .query("characterEditLogs")
+      .withIndex("by_character", (q) => q.eq("characterId", args.characterId))
+      .order("desc")
+      .collect();
+  },
+});
 
 export const createCharacter = mutation({
   args: {

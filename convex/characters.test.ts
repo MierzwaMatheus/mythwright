@@ -440,6 +440,114 @@ describe("characters.awardFatePoint", () => {
   });
 });
 
+describe("characters.getCharacterHistory", () => {
+  it("retorna logs ordenados por timestamp desc (mais recente primeiro)", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gch001", "gch001@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    // Primeiro update (timestamp menor)
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Nome Intermediario",
+    });
+
+    // Segundo update (timestamp maior)
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Nome Final",
+    });
+
+    const history = await identity.query(api.characters.getCharacterHistory, {
+      characterId: characterId as Id<"characters">,
+    });
+
+    expect(history).toHaveLength(2);
+    // Mais recente primeiro: newValue "Nome Final" deve vir antes de "Nome Intermediario"
+    expect(history[0].newValue).toBe("Nome Final");
+    expect(history[1].newValue).toBe("Nome Intermediario");
+  });
+
+  it("inclui messageId quando presente, undefined quando ausente", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gch002", "gch002@test.com");
+
+    let messageId: Id<"messages">;
+    await t.run(async (ctx) => {
+      messageId = await ctx.db.insert("messages", { campaignId });
+    });
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    // Log com messageId
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Com Mensagem",
+      messageId: messageId!,
+    });
+
+    // Log sem messageId
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Sem Mensagem",
+    });
+
+    const history = await identity.query(api.characters.getCharacterHistory, {
+      characterId: characterId as Id<"characters">,
+    });
+
+    expect(history).toHaveLength(2);
+    // Mais recente primeiro (sem messageId)
+    expect(history[0].messageId).toBeUndefined();
+    // O segundo tem messageId
+    expect(history[1].messageId).toBe(messageId!);
+  });
+
+  it("retorna array vazio quando nao ha historico", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gch003", "gch003@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    const history = await identity.query(api.characters.getCharacterHistory, {
+      characterId: characterId as Id<"characters">,
+    });
+
+    expect(history).toEqual([]);
+  });
+
+  it("sem autenticacao — rejeita com ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gch004", "gch004@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    await expect(
+      t.query(api.characters.getCharacterHistory, {
+        characterId: characterId as Id<"characters">,
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+});
+
 describe("characters.spendFatePoint", () => {
   it("erro saldo zero — rejeita com ConvexError quando fatePoints é 0", async () => {
     const t = convexTest(schema, modules);
