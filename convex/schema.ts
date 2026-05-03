@@ -70,6 +70,9 @@ export default defineSchema({
 
   facts: defineTable({
     campaignId: v.id("campaigns"),
+    content: v.string(),
+    visibility: v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known")),
+    relatedEntityIds: v.optional(v.array(v.id("entities"))),
   }).index("by_campaign", ["campaignId"]),
 
   triggers: defineTable({

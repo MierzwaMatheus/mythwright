@@ -592,6 +592,12 @@ describe("campaigns.deleteCampaign", () => {
             visibility: "known",
             description: "Descrição de teste.",
           });
+        } else if (table === "facts") {
+          await ctx.db.insert(table, {
+            campaignId,
+            content: "Fato de teste.",
+            visibility: "known",
+          });
         } else {
           await ctx.db.insert(table, { campaignId });
         }
