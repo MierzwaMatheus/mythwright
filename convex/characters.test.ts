@@ -348,6 +348,98 @@ describe("characters.updateCharacterField", () => {
   });
 });
 
+describe("characters.awardFatePoint", () => {
+  it("happy path — incrementa fatePoints de 3 para 4", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|afp001", "afp001@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    await identity.mutation(api.characters.awardFatePoint, {
+      characterId: characterId as Id<"characters">,
+      reason: "Roleplay excelente",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId as Id<"characters">);
+      expect(character!.fatePoints).toBe(4);
+    });
+  });
+
+  it("registro no log — grava fatePoints com oldValue, newValue e reason corretos", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|afp002", "afp002@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    await identity.mutation(api.characters.awardFatePoint, {
+      characterId: characterId as Id<"characters">,
+      reason: "Roleplay excelente",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].field).toBe("fatePoints");
+      expect(logs[0].oldValue).toBe(3);
+      expect(logs[0].newValue).toBe(4);
+      expect(logs[0].reason).toBe("Roleplay excelente");
+      expect(typeof logs[0].timestamp).toBe("number");
+    });
+  });
+
+  it("sem autenticacao — rejeita com ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|afp003", "afp003@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    await expect(
+      t.mutation(api.characters.awardFatePoint, {
+        characterId: characterId as Id<"characters">,
+        reason: "Sem auth",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("personagem de outra campanha — rejeita com ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|afp004", "afp004@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    const other = t.withIdentity({ tokenIdentifier: "token|afp004b", email: "afp004b@test.com" });
+    await other.mutation(api.users.upsertFromAuth, { displayName: "Outro GM" });
+
+    await expect(
+      other.mutation(api.characters.awardFatePoint, {
+        characterId: characterId as Id<"characters">,
+        reason: "Tentativa não autorizada",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+});
+
 describe("characters.spendFatePoint", () => {
   it("erro saldo zero — rejeita com ConvexError quando fatePoints é 0", async () => {
     const t = convexTest(schema, modules);
