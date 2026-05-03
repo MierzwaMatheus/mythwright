@@ -23,10 +23,10 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
   return intersection.size / union.size;
 }
 
-export function deduplicateFacts(
-  newFacts: Array<{ content: string }>,
+export function deduplicateFacts<T extends { content: string }>(
+  newFacts: Array<T>,
   existingFacts: Array<{ content: string }>
-): Array<{ content: string }> {
+): Array<T> {
   const existingTokens = existingFacts.map((f) => tokenize(f.content));
 
   return newFacts.filter((newFact) => {

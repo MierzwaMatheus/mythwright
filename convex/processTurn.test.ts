@@ -37,7 +37,7 @@ function mockLlmFetch(llmContent: string = "Resposta do GM.") {
   });
 }
 
-describe("processTurn", () => {
+describe("processTurn (legado — args sem clientMessageId)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
@@ -163,6 +163,124 @@ describe("processTurn", () => {
       expect(gmMsgs[0].status).toBe("leaked");
       expect(gmMsgs[1].status).toBe("leaked");
       expect(gmMsgs[2].status).toBe("failed");
+    });
+  });
+});
+
+describe("processTurn (K1 — estágios com clientMessageId)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // HP1: todos os estágios chamados em ordem correta
+  it("HP1: fluxo completo — mensagem GM fica 'complete' e fatos são extraídos no estágio 6", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    // fetch alternado: chamadas ímpares = LLM GM, pares = antiLeak (sem vazamento), resto = factExtraction
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // Estágio 2: LLM gera resposta GM
+        return { json: async () => ({ choices: [{ message: { content: "O rei está no castelo ao norte." } }] }) };
+      } else if (callCount === 2) {
+        // Estágio 4: antiLeak — não vazou
+        return {
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // Estágio 6: extractAndPersistFacts
+        return {
+          json: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({
+                  facts: [{ content: "O rei está no castelo ao norte.", visibility: "known", relatedEntityIds: [] }],
+                }),
+              },
+            }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-001",
+      hiddenFacts: [{ id: "fact_x", content: "O rei está morto." }],
+      playerMessageContent: "O que você vê ao norte?",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+    expect(messageId).toBeDefined();
+
+    await t.run(async (ctx) => {
+      // Verifica mensagem GM com status complete
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.status).toBe("complete");
+
+      // Verifica que o fato foi extraído (estágio 6 executado)
+      const facts = await ctx.db
+        .query("facts")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+        .collect();
+      expect(facts).toHaveLength(1);
+      expect(facts[0].content).toBe("O rei está no castelo ao norte.");
+    });
+  });
+
+  // EC1: falha no estágio 6 (extractAndPersistFacts lança erro) → status "failed" com conteúdo parcial preservado
+  it("EC1: erro no estágio 6 (extractAndPersistFacts) → mensagem fica 'failed' mas conteúdo GM é preservado", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // Estágio 2: LLM gera resposta GM
+        return { json: async () => ({ choices: [{ message: { content: "Conteúdo parcial do GM." } }] }) };
+      } else if (callCount === 2) {
+        // Estágio 4: antiLeak — não vazou
+        return {
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // Estágio 6: extractAndPersistFacts — erro de rede
+        throw new Error("Network error in fact extraction");
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-002",
+      hiddenFacts: [],
+      playerMessageContent: "O que acontece?",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: false });
+    expect((result as { success: false; reason: string }).reason).toBe("fact_extraction_failed");
+
+    await t.run(async (ctx) => {
+      const msgs = await ctx.db
+        .query("messages")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+        .collect();
+      const gmMsgs = msgs.filter((m) => m.role === "gm");
+      expect(gmMsgs).toHaveLength(1);
+      // Conteúdo parcial preservado
+      expect(gmMsgs[0].content).toBe("Conteúdo parcial do GM.");
+      // Status reflete falha no estágio 6
+      expect(gmMsgs[0].status).toBe("failed");
     });
   });
 });

@@ -53,8 +53,10 @@ export const createGmMessage = internalMutation({
 export const processTurn = internalAction({
   args: {
     campaignId: v.id("campaigns"),
+    clientMessageId: v.optional(v.string()),
     hiddenFacts: v.array(v.object({ id: v.string(), content: v.string() })),
     playerMessageContent: v.string(),
+    antiLeakValidationEnabled: v.optional(v.boolean()),
   },
   handler: async (ctx, args): Promise<{ success: true; messageId: Id<"messages"> } | { success: false; reason: string }> => {
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
@@ -75,6 +77,21 @@ export const processTurn = internalAction({
           messageId,
           status: "complete",
         });
+
+        // Estágio 6: extrair e persistir fatos
+        try {
+          await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+            messageId,
+            campaignId: args.campaignId,
+          });
+        } catch {
+          await ctx.runMutation(internal.processTurn.markMessageStatus, {
+            messageId,
+            status: "failed",
+          });
+          return { success: false, reason: "fact_extraction_failed" };
+        }
+
         return { success: true, messageId };
       }
 
