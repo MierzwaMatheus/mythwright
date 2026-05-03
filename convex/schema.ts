@@ -109,4 +109,10 @@ export default defineSchema({
     messageId: v.optional(v.id("messages")),
     reason: v.optional(v.string()),
   }).index("by_character", ["characterId"]),
+
+  sceneAspects: defineTable({
+    sceneId: v.id("scenes"),
+    text: v.string(),
+    freeInvokes: v.number(),
+  }).index("by_scene", ["sceneId"]),
 });
