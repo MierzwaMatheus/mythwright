@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rollFateDice, calculateOutcome } from "./index.js";
+import { rollFateDice, calculateOutcome, applyAspectInvocation } from "./index.js";
 import type { FateDie } from "./index.js";
 
 describe("rollFateDice", () => {
@@ -91,5 +91,60 @@ describe("calculateOutcome", () => {
 
   it("returns success_with_style when difference is very large", () => {
     expect(calculateOutcome(10, 0)).toBe("success_with_style");
+  });
+});
+
+describe("applyAspectInvocation", () => {
+  // Caso 1: bonus_2 incrementa total em +2
+  it("bonus_2 increments total by exactly 2", () => {
+    const roll = rollFateDice("test-seed", 3);
+    const result = applyAspectInvocation(roll, "bonus_2");
+    expect(result.total).toBe(roll.total + 2);
+  });
+
+  // Caso 2: bonus_2 não altera dice
+  it("bonus_2 does not alter the dice array", () => {
+    const roll = rollFateDice("test-seed", 3);
+    const result = applyAspectInvocation(roll, "bonus_2");
+    expect(result.dice).toEqual(roll.dice);
+  });
+
+  // Caso 3: bonus_2 funciona sem seed
+  it("bonus_2 works without a seed", () => {
+    const roll = rollFateDice("test-seed", 3);
+    expect(() => applyAspectInvocation(roll, "bonus_2")).not.toThrow();
+  });
+
+  // Caso 4: reroll retorna resultado determinístico (mesma seed → mesmo resultado)
+  it("reroll returns deterministic result given the same seed", () => {
+    const roll = rollFateDice("initial-seed", 2);
+    const first = applyAspectInvocation(roll, "reroll", "reroll-seed");
+    const second = applyAspectInvocation(roll, "reroll", "reroll-seed");
+    expect(first).toEqual(second);
+  });
+
+  // Caso 5: reroll com seed diferente pode retornar dados diferentes
+  it("reroll with different seeds can return different dice", () => {
+    const roll = rollFateDice("initial-seed", 2);
+    const resultA = applyAspectInvocation(roll, "reroll", "seed-alpha-111");
+    const resultB = applyAspectInvocation(roll, "reroll", "seed-beta-999");
+    expect(resultA.dice).not.toEqual(resultB.dice);
+  });
+
+  // Caso 6: reroll preserva o skillLevel implícito no total
+  it("reroll preserves the implicit skillLevel in the new total", () => {
+    const skillLevel = 4;
+    const roll = rollFateDice("initial-seed", skillLevel);
+    const result = applyAspectInvocation(roll, "reroll", "reroll-seed");
+    const diceSum = result.dice.reduce((acc, d) => acc + d, 0);
+    expect(result.total).toBe(diceSum + skillLevel);
+  });
+
+  // Caso 7: reroll sem seed lança erro
+  it("reroll without seed throws Error('seed is required for reroll')", () => {
+    const roll = rollFateDice("test-seed", 3);
+    expect(() => applyAspectInvocation(roll, "reroll")).toThrow(
+      "seed is required for reroll"
+    );
   });
 });

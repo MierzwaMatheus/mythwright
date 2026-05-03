@@ -53,3 +53,22 @@ export function rollFateDice(seed: string, skillLevel: number): FateDiceResult {
 
   return { dice, total };
 }
+
+export function applyAspectInvocation(
+  roll: FateDiceResult,
+  effect: "bonus_2" | "reroll",
+  seed?: string
+): FateDiceResult {
+  if (effect === "bonus_2") {
+    return { dice: roll.dice, total: roll.total + 2 };
+  }
+
+  // effect === "reroll"
+  if (seed === undefined) {
+    throw new Error("seed is required for reroll");
+  }
+
+  const diceSum = roll.dice.reduce((acc, d) => acc + d, 0);
+  const skillLevel = roll.total - diceSum;
+  return rollFateDice(seed, skillLevel);
+}
