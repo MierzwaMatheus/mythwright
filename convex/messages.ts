@@ -47,6 +47,33 @@ export const finalizeMessage = mutation({
   },
 });
 
+export const appendToolCall = mutation({
+  args: {
+    messageId: v.id("messages"),
+    toolName: v.string(),
+    toolParams: v.any(),
+    toolResult: v.any(),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (message === null) {
+      throw new Error(`Message not found: ${args.messageId}`);
+    }
+    const existing = message.toolCalls ?? [];
+    await ctx.db.patch(args.messageId, {
+      toolCalls: [
+        ...existing,
+        {
+          toolName: args.toolName,
+          toolParams: args.toolParams,
+          toolResult: args.toolResult,
+          executedAt: Date.now(),
+        },
+      ],
+    });
+  },
+});
+
 export const appendMessageTokens = mutation({
   args: {
     messageId: v.id("messages"),

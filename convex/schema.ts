@@ -65,6 +65,12 @@ export default defineSchema({
     clientMessageId: v.string(),
     status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed")),
     finalizedAt: v.optional(v.number()),
+    toolCalls: v.optional(v.array(v.object({
+      toolName: v.string(),
+      toolParams: v.any(),
+      toolResult: v.any(),
+      executedAt: v.number(),
+    }))),
   }).index("by_campaign", ["campaignId"])
     .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"]),
 
