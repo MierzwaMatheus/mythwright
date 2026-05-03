@@ -21,3 +21,10 @@ export const _getTriggerById = internalQuery({
     return await ctx.db.get(args.triggerId);
   },
 });
+
+export const _getSummaryById = internalQuery({
+  args: { summaryId: v.id("summaries") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.summaryId);
+  },
+});

@@ -82,3 +82,20 @@ export const embedTrigger = internalAction({
     });
   },
 });
+
+export const embedSummary = internalAction({
+  args: { summaryId: v.id("summaries") },
+  handler: async (ctx, args) => {
+    const summaryDoc = await ctx.runQuery(internal.embedding._getSummaryById, { summaryId: args.summaryId });
+    if (!summaryDoc) return;
+
+    const embedding = await ctx.runAction(internal.lib.embedding.generateEmbedding, {
+      text: summaryDoc.content,
+    });
+
+    await ctx.runMutation(internal.summaries.setSummaryEmbedding, {
+      summaryId: args.summaryId,
+      embedding,
+    });
+  },
+});
