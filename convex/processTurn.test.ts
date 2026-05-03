@@ -46,6 +46,52 @@ function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
+// Helper para criar SSE stream com tool_call no formato OpenRouter
+function makeSseToolCallStream(
+  textBefore: string,
+  toolName: string,
+  toolParams: object,
+  toolCallId: string,
+  textAfter: string
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    start(controller) {
+      if (textBefore) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: textBefore } }] })}\n\n`
+          )
+        );
+      }
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({
+            choices: [{
+              delta: {
+                tool_calls: [{
+                  id: toolCallId,
+                  type: "function",
+                  function: { name: toolName, arguments: JSON.stringify(toolParams) },
+                }],
+              },
+            }],
+          })}\n\n`
+        )
+      );
+      if (textAfter) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ choices: [{ delta: { content: textAfter } }] })}\n\n`
+          )
+        );
+      }
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
+
 describe("processTurn (legado — args sem clientMessageId)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -323,25 +369,46 @@ describe("processTurn (K2 — tool calls)", () => {
     vi.unstubAllGlobals();
   });
 
-  it("HP1: LLM retorna tool_call JSON → content concatenado e toolCalls populado", async () => {
+  it("HP1: LLM retorna tool_call SSE → toolCall executada, persistida e resultado correto", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    const toolCallPayload = JSON.stringify({
-      type: "tool_call",
-      textBefore: "Você rola os dados...",
-      toolName: "roll_fate_dice",
-      toolParams: { numDice: 4 },
-      toolResult: { dice: ["+", "+", "-", "0"], total: 1 },
-      textAfter: "Resultado: +1. Você tem sucesso!",
+    // Criar character e scene necessários para executar a tool
+    const { characterId } = await t.run(async (ctx) => {
+      const characterId = await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói K2",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false], mental: [false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena K2",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      return { characterId };
     });
 
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        // Estágio 2: LLM retorna tool call (streaming)
-        return { ok: true, body: makeSseStream([toolCallPayload]) };
+        // Estágio 2: LLM retorna tool call SSE (award_fate_point)
+        return {
+          ok: true,
+          body: makeSseToolCallStream(
+            "Você age heroicamente... ",
+            "award_fate_point",
+            { characterId, reason: "Ato heróico" },
+            "call-k2-001",
+            "Ganhou um Ponto de Destino!"
+          ),
+        };
       } else if (callCount === 2) {
         // Estágio 4: antiLeak — não vazou
         return {
@@ -355,11 +422,7 @@ describe("processTurn (K2 — tool calls)", () => {
         return {
           ok: true,
           json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({ facts: [] }),
-              },
-            }],
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
           }),
         };
       }
@@ -369,7 +432,7 @@ describe("processTurn (K2 — tool calls)", () => {
       campaignId,
       clientMessageId: "player-msg-k2-001",
       hiddenFacts: [],
-      playerMessageContent: "Rolo os dados!",
+      playerMessageContent: "Faço algo heroico!",
       antiLeakValidationEnabled: true,
     });
 
@@ -379,12 +442,12 @@ describe("processTurn (K2 — tool calls)", () => {
     await t.run(async (ctx) => {
       const msg = await ctx.db.get(messageId as any);
       expect(msg).not.toBeNull();
-      expect((msg as any)!.content).toBe("Você rola os dados... Resultado: +1. Você tem sucesso!");
       expect((msg as any)!.toolCalls).toHaveLength(1);
-      expect((msg as any)!.toolCalls[0].toolName).toBe("roll_fate_dice");
-      expect((msg as any)!.toolCalls[0].toolParams).toEqual({ numDice: 4 });
-      expect((msg as any)!.toolCalls[0].toolResult).toEqual({ dice: ["+", "+", "-", "0"], total: 1 });
+      expect((msg as any)!.toolCalls[0].toolName).toBe("award_fate_point");
       expect(typeof (msg as any)!.toolCalls[0].executedAt).toBe("number");
+      // Verificar que o personagem ganhou PD
+      const char = await ctx.db.get(characterId as any) as any;
+      expect(char!.fatePoints).toBe(4);
     });
   });
 
@@ -614,26 +677,19 @@ describe("processTurn (K3 — compel_aspect)", () => {
     });
   }
 
-  it("HP1: tool call compel_aspect → retorna awaiting_player_decision com compelId válido", async () => {
+  it("HP1: tool call compel_aspect SSE → retorna awaiting_player_decision com compelId válido", async () => {
     const t = convexTest(schema, modules);
     const { campaignId, characterId, aspectId } = await setupCampaignWithSceneAndAspect(t);
 
-    const compelPayload = JSON.stringify({
-      type: "tool_call",
-      textBefore: "Seu aspecto 'Dívida com o demônio' complica as coisas...",
-      toolName: "compel_aspect",
-      toolParams: {
-        aspectId,
-        characterId,
-        complication: "O demônio aparece e exige pagamento agora.",
-      },
-      toolResult: null,
-      textAfter: "",
-    });
-
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       ok: true,
-      body: makeSseStream([compelPayload]),
+      body: makeSseToolCallStream(
+        "Seu aspecto 'Dívida com o demônio' complica as coisas...",
+        "compel_aspect",
+        { aspectId, characterId, complication: "O demônio aparece e exige pagamento agora." },
+        "call-k3-compel-001",
+        ""
+      ),
     }));
 
     const result = await t.action(internal.processTurn.processTurn, {

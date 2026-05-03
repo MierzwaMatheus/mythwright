@@ -107,12 +107,12 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/02-technical-architecture.md` §8 (catálogo de tools FATE) e `@docs/01-gap-report.md` G-003
 
-- [ ] Criar `convex/tools/registry.ts` mapeando cada tool FATE para a mutation/action correspondente
-- [ ] Definir JSON Schema (OpenRouter format) para cada tool: `roll_fate_dice`, `invoke_aspect`, `compel_aspect`, `apply_stress`, `apply_consequence`, `award_fate_point`, `spend_fate_point`, `add_scene_aspect`, `change_scene`, `reveal_fact`, `reveal_entity`
-- [ ] Implementar loop de tool calling em `processTurn`: stream → detectar `tool_call` → executar via registry → append result → continuar stream
-- [ ] Criar wrapper `roll_fate_dice` que chama `rollFateDice` do fate-engine e persiste resultado em `diceRolls`
-- [ ] Testar loop completo de tool calling com mock de stream contendo tool_calls
-- [ ] Testar cada tool individualmente via registry
+- [x] Criar `convex/tools/registry.ts` mapeando cada tool FATE para a mutation/action correspondente
+- [x] Definir JSON Schema (OpenRouter format) para cada tool: `roll_fate_dice`, `invoke_aspect`, `compel_aspect`, `apply_stress`, `apply_consequence`, `award_fate_point`, `spend_fate_point`, `add_scene_aspect`, `change_scene`, `reveal_fact`, `reveal_entity`
+- [x] Implementar loop de tool calling em `processTurn`: stream → detectar `tool_call` → executar via registry → append result → continuar stream
+- [x] Criar wrapper `roll_fate_dice` que chama `rollFateDice` do fate-engine e persiste resultado em `diceRolls`
+- [x] Testar loop completo de tool calling com mock de stream contendo tool_calls
+- [x] Testar cada tool individualmente via registry
 
 ### processTurn — 8 Estágios Completos — G-001
 

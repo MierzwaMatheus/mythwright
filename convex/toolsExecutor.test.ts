@@ -208,7 +208,7 @@ describe("executeFateTool", () => {
     expect(oldScene!.status).toBe("completed");
 
     // Nova cena deve estar active
-    const newScene = await t.run(async (ctx) => ctx.db.get(result.newSceneId));
+    const newScene = await t.run(async (ctx) => ctx.db.get((result as any).newSceneId)) as any;
     expect(newScene!.title).toBe("A Taverna");
     expect(newScene!.status).toBe("active");
   });

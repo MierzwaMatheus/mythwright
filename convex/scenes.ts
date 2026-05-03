@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query, internalQuery, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
@@ -114,5 +114,16 @@ export const updateSceneStatus = mutation({
     await assertCampaignOwnership(ctx, scene.campaignId, user._id);
 
     await ctx.db.patch(args.sceneId, { status: args.status });
+  },
+});
+
+export const getActiveSceneInternal = internalQuery({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("scenes")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .first();
   },
 });

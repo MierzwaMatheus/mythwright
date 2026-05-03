@@ -73,7 +73,7 @@ describe("FATE tools catalog", () => {
 
     it("type deve ser enum com os 4 tipos FATE válidos", () => {
       const tool = getFateTool("roll_fate_dice")!;
-      const typeProp = tool.function.parameters.properties.type;
+      const typeProp = tool.function.parameters.properties.type as any;
       expect(typeProp.enum).toEqual(
         expect.arrayContaining(["attack", "defend", "overcome", "create_advantage"])
       );
@@ -94,7 +94,7 @@ describe("FATE tools catalog", () => {
 
     it("effect deve ser enum bonus_2 | reroll", () => {
       const tool = getFateTool("invoke_aspect")!;
-      const effectProp = tool.function.parameters.properties.effect;
+      const effectProp = tool.function.parameters.properties.effect as any;
       expect(effectProp.enum).toEqual(expect.arrayContaining(["bonus_2", "reroll"]));
     });
   });
@@ -126,7 +126,7 @@ describe("FATE tools catalog", () => {
 
     it("track deve ser enum physical | mental", () => {
       const tool = getFateTool("apply_stress")!;
-      const trackProp = tool.function.parameters.properties.track;
+      const trackProp = tool.function.parameters.properties.track as any;
       expect(trackProp.enum).toEqual(expect.arrayContaining(["physical", "mental"]));
     });
   });
@@ -145,7 +145,7 @@ describe("FATE tools catalog", () => {
 
     it("severity deve ser enum mild | moderate | severe", () => {
       const tool = getFateTool("apply_consequence")!;
-      const severityProp = tool.function.parameters.properties.severity;
+      const severityProp = tool.function.parameters.properties.severity as any;
       expect(severityProp.enum).toEqual(
         expect.arrayContaining(["mild", "moderate", "severe"])
       );

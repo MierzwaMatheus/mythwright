@@ -15,32 +15,12 @@ type ToolCallRecord = {
   executedAt: number;
 };
 
-type ParsedLlmResponse = {
-  content: string;
-  toolCalls?: ToolCallRecord[];
-};
 
-function parseLlmResponse(raw: string): ParsedLlmResponse {
-  try {
-    const parsed = JSON.parse(raw);
-    if (parsed && parsed.type === "tool_call") {
-      return {
-        content: `${parsed.textBefore} ${parsed.textAfter}`,
-        toolCalls: [{
-          toolName: parsed.toolName,
-          toolParams: parsed.toolParams,
-          toolResult: parsed.toolResult,
-          executedAt: Date.now(),
-        }],
-      };
-    }
-  } catch {
-    // Não é JSON — trata como texto simples
-  }
-  return { content: raw };
-}
+type StreamEvent =
+  | { type: "text_delta"; delta: string }
+  | { type: "tool_call"; toolName: string; toolParams: unknown; toolCallId: string };
 
-async function* parseStreamingResponse(body: ReadableStream<Uint8Array>) {
+async function* parseStreamingResponse(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -57,7 +37,19 @@ async function* parseStreamingResponse(body: ReadableStream<Uint8Array>) {
       try {
         const parsed = JSON.parse(data);
         const delta = parsed.choices[0]?.delta;
-        if (delta?.content) yield { type: "text_delta" as const, delta: delta.content };
+        if (!delta) continue;
+        if (delta.content) {
+          yield { type: "text_delta", delta: delta.content };
+        }
+        if (delta.tool_calls && Array.isArray(delta.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            if (tc.function?.name) {
+              let params: unknown = {};
+              try { params = JSON.parse(tc.function.arguments ?? "{}"); } catch {}
+              yield { type: "tool_call", toolName: tc.function.name, toolParams: params, toolCallId: tc.id ?? "" };
+            }
+          }
+        }
       } catch {}
     }
   }
@@ -141,10 +133,14 @@ export const processTurn = internalAction({
         content: "",
       });
 
-      // Iterar o stream acumulando texto
+      // Iterar o stream acumulando texto e tool calls
       let pendingBuffer = "";
       let fullText = "";
       let lastFlushAt = Date.now();
+      const accumulatedToolCalls: ToolCallRecord[] = [];
+
+      // Obter cena ativa para o contexto das tools
+      const activeScene = await ctx.runQuery(internal.scenes.getActiveSceneInternal, { campaignId: args.campaignId });
 
       for await (const event of parseStreamingResponse(streamBody)) {
         if (event.type === "text_delta") {
@@ -162,6 +158,51 @@ export const processTurn = internalAction({
             pendingBuffer = "";
             lastFlushAt = Date.now();
           }
+        } else if (event.type === "tool_call") {
+          // Flush texto pendente antes de executar a tool
+          if (pendingBuffer.length > 0) {
+            await ctx.runMutation(api.messages.appendMessageTokens, {
+              messageId: gmMessageId,
+              tokens: pendingBuffer,
+            });
+            pendingBuffer = "";
+            lastFlushAt = Date.now();
+          }
+
+          if (event.toolName === "compel_aspect") {
+            // compel_aspect pausa o turno — registrar e parar o stream
+            const params = event.toolParams as { aspectId: Id<"sceneAspects">; characterId: Id<"characters">; complication: string };
+            const compelId: Id<"compels"> = await ctx.runMutation(internal.compels.beginCompelInternal, {
+              campaignId: args.campaignId,
+              aspectId: params.aspectId,
+              characterId: params.characterId,
+              complication: params.complication,
+            });
+            // Persistir conteúdo parcial na mensagem antes de pausar
+            await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
+              messageId: gmMessageId,
+              content: fullText,
+              toolCalls: accumulatedToolCalls,
+            });
+            return { status: "awaiting_player_decision", compelId, messageId: gmMessageId };
+          } else {
+            // Executar tool via mutation
+            const toolResult = await ctx.runMutation(internal.tools.executor.executeFateTool, {
+              toolName: event.toolName,
+              toolParams: event.toolParams,
+              context: {
+                campaignId: args.campaignId,
+                messageId: gmMessageId,
+                sceneId: (activeScene?._id ?? "") as Id<"scenes">,
+              },
+            });
+            accumulatedToolCalls.push({
+              toolName: event.toolName,
+              toolParams: event.toolParams,
+              toolResult,
+              executedAt: Date.now(),
+            });
+          }
         }
       }
 
@@ -173,34 +214,23 @@ export const processTurn = internalAction({
         });
       }
 
-      // Conteúdo completo acumulado localmente (sem query extra ao banco)
-      const fullContent = fullText;
-      const { content: gmContent, toolCalls } = parseLlmResponse(fullContent);
-
-      // Detectar compel_aspect antes de persistir a mensagem normalmente
-      if (toolCalls && toolCalls.length > 0 && toolCalls[0].toolName === "compel_aspect") {
-        const params = toolCalls[0].toolParams as { aspectId: Id<"sceneAspects">; characterId: Id<"characters">; complication: string };
-        // Atualizar conteúdo e toolCalls na mensagem já criada
-        await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
-          messageId: gmMessageId,
-          content: gmContent,
-          toolCalls,
-        });
-        const compelId: Id<"compels"> = await ctx.runMutation(internal.compels.beginCompelInternal, {
-          campaignId: args.campaignId,
-          aspectId: params.aspectId,
-          characterId: params.characterId,
-          complication: params.complication,
-        });
-        return { status: "awaiting_player_decision", compelId, messageId: gmMessageId };
-      }
-
-      // Atualizar conteúdo final (parseLlmResponse pode ter concatenado textBefore + textAfter)
+      // Persistir conteúdo final e tool calls acumuladas
       await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
         messageId: gmMessageId,
-        content: gmContent,
-        toolCalls,
+        content: fullText,
+        toolCalls: accumulatedToolCalls.length > 0 ? accumulatedToolCalls : undefined,
       });
+
+      // Respeitar antiLeakValidationEnabled
+      const antiLeakEnabled = args.antiLeakValidationEnabled !== false;
+
+      if (!antiLeakEnabled) {
+        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+          messageId: gmMessageId,
+          status: "complete",
+        });
+        return { success: true, messageId: gmMessageId };
+      }
 
       const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
         messageId: gmMessageId,

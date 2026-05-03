@@ -38,6 +38,9 @@ import type * as stress from "../stress.js";
 import type * as summaries from "../summaries.js";
 import type * as summarizeArc from "../summarizeArc.js";
 import type * as summarizeScene from "../summarizeScene.js";
+import type * as tools_catalog from "../tools/catalog.js";
+import type * as tools_executor from "../tools/executor.js";
+import type * as tools_rollFateDice from "../tools/rollFateDice.js";
 import type * as triggers from "../triggers.js";
 import type * as users from "../users.js";
 
@@ -78,6 +81,9 @@ declare const fullApi: ApiFromModules<{
   summaries: typeof summaries;
   summarizeArc: typeof summarizeArc;
   summarizeScene: typeof summarizeScene;
+  "tools/catalog": typeof tools_catalog;
+  "tools/executor": typeof tools_executor;
+  "tools/rollFateDice": typeof tools_rollFateDice;
   triggers: typeof triggers;
   users: typeof users;
 }>;
