@@ -15,11 +15,11 @@ Pré-condição: `tasks.md` (parte 1) totalmente concluído. As tasks abaixo cob
 
 `convex/messages.ts` já expõe `setEmbeddingInternal`, mas **nenhum caller agenda o embedding da mensagem do jogador** após sua criação. Sem isso, o vectorIndex de `messages` permanece vazio e a busca semântica de turnos passados não funciona.
 
-- [ ] Criar `internalAction embedMessage(messageId)` em `convex/lib/embedding.ts` que lê o conteúdo da mensagem, chama `generateEmbedding`, e persiste via `messages.setEmbeddingInternal`
-- [ ] Em `convex/messages.ts:createMessage`, agendar `ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId })` após inserção bem-sucedida (apenas para `role === "player"` — mensagens do GM são embedadas no Estágio 7)
-- [ ] No fim do Estágio 7 do `processTurnFull`, agendar `embedMessage` para a mensagem GM finalizada
-- [ ] Testar que `createMessage` agenda embedding para mensagem do player
-- [ ] Testar que `processTurnFull` finaliza com embedding da resposta do GM persistido
+- [x] Criar `internalAction embedMessage(messageId)` em `convex/lib/embedding.ts` que lê o conteúdo da mensagem, chama `generateEmbedding`, e persiste via `messages.setEmbeddingInternal`
+- [x] Em `convex/messages.ts:createMessage`, agendar `ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId })` após inserção bem-sucedida (apenas para `role === "player"` — mensagens do GM são embedadas no Estágio 7)
+- [x] No fim do Estágio 7 do `processTurnFull`, agendar `embedMessage` para a mensagem GM finalizada
+- [x] Testar que `createMessage` agenda embedding para mensagem do player
+- [x] Testar que `processTurnFull` finaliza com embedding da resposta do GM persistido
 
 ### Recuperação Semântica em `buildFullContext` — G-102
 

@@ -28,3 +28,10 @@ export const _getSummaryById = internalQuery({
     return await ctx.db.get(args.summaryId);
   },
 });
+
+export const _getMessageById = internalQuery({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.messageId);
+  },
+});

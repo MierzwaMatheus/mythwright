@@ -99,3 +99,17 @@ export const embedSummary = internalAction({
     });
   },
 });
+
+export const embedMessage = internalAction({
+  args: { messageId: v.id("messages"), content: v.string() },
+  handler: async (ctx, args) => {
+    const embedding = await ctx.runAction(internal.lib.embedding.generateEmbedding, {
+      text: args.content,
+    });
+
+    await ctx.runMutation(internal.messages.setEmbeddingInternal, {
+      messageId: args.messageId,
+      embedding,
+    });
+  },
+});

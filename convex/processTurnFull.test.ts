@@ -427,3 +427,63 @@ describe("processTurnFull (G-018 — idempotência)", () => {
     });
   });
 });
+
+describe("processTurnFull (G-101 — embedding GM agendado)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("G-101: após Estágio 7, embedMessage é agendado para a mensagem GM", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que você vê ao redor?",
+        clientMessageId: "player-embed-g101",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { ok: true, body: makeSseStream(["Você vê uma floresta densa."]) };
+      } else if (callCount === 2) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+
+    await t.run(async (ctx) => {
+      const scheduled = await ctx.db.system.query("_scheduled_functions").collect();
+      const embedScheduled = scheduled.some(
+        (s: any) => s.name === "lib/embedding:embedMessage"
+      );
+      expect(embedScheduled).toBe(true);
+    });
+  });
+});

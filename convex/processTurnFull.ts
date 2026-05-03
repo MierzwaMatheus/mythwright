@@ -306,6 +306,8 @@ export const processTurnFull = internalAction({
           factsRevealed: [],
         });
 
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId: gmMessageId, content: fullText });
+
         // Estágio 8: threshold de resumo
         if (activeScene) {
           const msgCount = await ctx.runQuery(

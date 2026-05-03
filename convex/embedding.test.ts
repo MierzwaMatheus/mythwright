@@ -1,7 +1,8 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { internal } from "./_generated/api";
+import { api, internal } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
@@ -208,5 +209,107 @@ describe("embedTrigger", () => {
 
     const trigger = await t.run(async (ctx) => ctx.db.get(triggerId));
     expect(trigger?.embedding).toHaveLength(1024);
+  });
+});
+
+describe("embedMessage", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-api-key");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  async function setupUserCampaignMessage(
+    t: ReturnType<typeof convexTest>,
+    role: "player" | "gm" | "system" = "player",
+  ) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "emsg@test.com",
+        displayName: "GM",
+        tokenIdentifier: "token|emsg001",
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "C",
+        premise: "P",
+        tone: "T",
+        expectedDuration: "medium",
+        status: "setup",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const messageId = await ctx.db.insert("messages", {
+        campaignId,
+        role,
+        content: "Eu ataco o goblin",
+        clientMessageId: "test-client-id",
+        status: "pending",
+      });
+      return { userId, campaignId, messageId };
+    });
+  }
+
+  it("persiste embedding na mensagem após embedMessage", async () => {
+    const t = convexTest(schema, modules);
+    const { messageId } = await setupUserCampaignMessage(t);
+    const fakeEmbedding = makeFakeEmbedding(1024);
+    vi.stubGlobal("fetch", mockFetch(fakeEmbedding));
+
+    await t.action(internal.lib.embedding.embedMessage, { messageId, content: "Eu ataco o goblin" });
+
+    const msg = await t.run(async (ctx) => ctx.db.get(messageId));
+    expect(msg?.embedding).toHaveLength(1024);
+    expect(msg?.embedding).toEqual(fakeEmbedding);
+  });
+
+  it("createMessage agenda embedding para mensagem do player", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const fakeEmbedding = makeFakeEmbedding(1024);
+    vi.stubGlobal("fetch", mockFetch(fakeEmbedding));
+
+    const { campaignId } = await setupUserCampaignMessage(t);
+
+    const messageId = await t.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "player",
+      content: "Eu examino a porta",
+      clientMessageId: "new-player-msg",
+    });
+
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    vi.useRealTimers();
+
+    const msg = await t.run(async (ctx) => ctx.db.get(messageId as Id<"messages">));
+    expect(msg?.embedding).toHaveLength(1024);
+  });
+
+  it("createMessage NÃO agenda embedding para mensagem do gm", async () => {
+    vi.useFakeTimers();
+    const t = convexTest(schema, modules);
+    const fakeEmbedding = makeFakeEmbedding(1024);
+    const fakeFetch = mockFetch(fakeEmbedding);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const { campaignId } = await setupUserCampaignMessage(t);
+
+    const messageId = await t.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm",
+      content: "O GM responde",
+      clientMessageId: "gm-msg-no-embed",
+    });
+
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    vi.useRealTimers();
+
+    const msg = await t.run(async (ctx) => ctx.db.get(messageId as Id<"messages">));
+    expect(msg?.embedding).toBeUndefined();
   });
 });
