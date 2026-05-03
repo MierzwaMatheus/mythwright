@@ -73,4 +73,13 @@ export default defineSchema({
   diceRolls: defineTable({
     campaignId: v.id("campaigns"),
   }).index("by_campaign", ["campaignId"]),
+
+  characterEditLogs: defineTable({
+    characterId: v.id("characters"),
+    field: v.string(),
+    oldValue: v.any(),
+    newValue: v.any(),
+    timestamp: v.number(),
+    messageId: v.optional(v.id("messages")),
+  }).index("by_character", ["characterId"]),
 });

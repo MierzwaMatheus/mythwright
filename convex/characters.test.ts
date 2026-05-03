@@ -159,3 +159,191 @@ describe("characters.createCharacter", () => {
     ).rejects.toThrow(ConvexError);
   });
 });
+
+describe("characters.updateCharacterField", () => {
+  it("atualiza campo e registra log em characterEditLogs", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf001", "ucf001@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    // Atualiza campo name
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Aric o Poderoso",
+    });
+
+    // Atualiza campo fatePoints
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "fatePoints",
+      value: 5,
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(2);
+
+      const nameLog = logs.find((l) => l.field === "name");
+      expect(nameLog).toBeDefined();
+      expect(nameLog!.oldValue).toBe("Aric Stormhand");
+      expect(nameLog!.newValue).toBe("Aric o Poderoso");
+
+      const fateLog = logs.find((l) => l.field === "fatePoints");
+      expect(fateLog).toBeDefined();
+      expect(fateLog!.oldValue).toBe(3);
+      expect(fateLog!.newValue).toBe(5);
+    });
+  });
+
+  it("log registra oldValue e newValue corretos apos atualizar name", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf002", "ucf002@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      name: "Aragorn",
+      campaignId,
+    });
+
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Strider",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].oldValue).toBe("Aragorn");
+      expect(logs[0].newValue).toBe("Strider");
+    });
+  });
+
+  it("log registra field correto com o nome exato do campo passado", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf003", "ucf003@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Novo Nome",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].field).toBe("name");
+    });
+  });
+
+  it("log registra timestamp como numero maior que zero", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf004", "ucf004@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Nome Atualizado",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(typeof logs[0].timestamp).toBe("number");
+      expect(logs[0].timestamp).toBeGreaterThan(0);
+    });
+  });
+
+  it("log registra messageId quando fornecido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf005", "ucf005@test.com");
+
+    // Cria uma mensagem para obter um messageId valido
+    let messageId: Id<"messages">;
+    await t.run(async (ctx) => {
+      messageId = await ctx.db.insert("messages", {
+        campaignId,
+      });
+    });
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Nome Com Mensagem",
+      messageId: messageId!,
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].messageId).toBe(messageId!);
+    });
+  });
+
+  it("log sem messageId quando omitido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|ucf006", "ucf006@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+    });
+
+    await identity.mutation(api.characters.updateCharacterField, {
+      characterId: characterId as Id<"characters">,
+      field: "name",
+      value: "Nome Sem Mensagem",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].messageId).toBeUndefined();
+    });
+  });
+});
