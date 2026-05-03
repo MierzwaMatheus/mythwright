@@ -1,5 +1,20 @@
-import { mutation } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
+
+export const getMessagesByScene = query({
+  args: {
+    sceneId: v.id("scenes"),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_scene_and_createdAt", (q) => q.eq("sceneId", args.sceneId))
+      .order("asc")
+      .paginate(args.paginationOpts);
+  },
+});
 
 export const createMessage = mutation({
   args: {

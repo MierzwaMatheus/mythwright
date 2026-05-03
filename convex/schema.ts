@@ -60,10 +60,12 @@ export default defineSchema({
 
   messages: defineTable({
     campaignId: v.id("campaigns"),
+    sceneId: v.optional(v.id("scenes")),
     role: v.union(v.literal("player"), v.literal("gm"), v.literal("system")),
     content: v.string(),
     clientMessageId: v.string(),
     status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed")),
+    createdAt: v.optional(v.number()),
     finalizedAt: v.optional(v.number()),
     toolCalls: v.optional(v.array(v.object({
       toolName: v.string(),
@@ -72,7 +74,8 @@ export default defineSchema({
       executedAt: v.number(),
     }))),
   }).index("by_campaign", ["campaignId"])
-    .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"]),
+    .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"])
+    .index("by_scene_and_createdAt", ["sceneId", "createdAt"]),
 
   entities: defineTable({
     campaignId: v.id("campaigns"),
