@@ -295,6 +295,10 @@ describe("characters.updateCharacterField", () => {
     await t.run(async (ctx) => {
       messageId = await ctx.db.insert("messages", {
         campaignId,
+        role: "gm",
+        content: "Mensagem de teste.",
+        clientMessageId: "test-msg-ucf005",
+        status: "pending",
       });
     });
 
@@ -481,7 +485,13 @@ describe("characters.getCharacterHistory", () => {
 
     let messageId: Id<"messages">;
     await t.run(async (ctx) => {
-      messageId = await ctx.db.insert("messages", { campaignId });
+      messageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "gm",
+        content: "Mensagem de teste.",
+        clientMessageId: "test-msg-gch002",
+        status: "pending",
+      });
     });
 
     const characterId = await identity.mutation(api.characters.createCharacter, {

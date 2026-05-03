@@ -74,6 +74,21 @@ export function calculateStress(amount: number, track: StressTrack): StressResul
   return { canAbsorb: false, requiresConsequence: true, overflow: amount };
 }
 
+export interface TriggerCandidate {
+  id: string;
+  status: "armed" | "disabled" | "fired";
+  scope: string;
+}
+
+export function filterTriggerCandidates(
+  triggers: TriggerCandidate[],
+  currentSceneId: string
+): TriggerCandidate[] {
+  return triggers.filter(
+    (t) => t.status === "armed" && (t.scope === "global" || t.scope === currentSceneId)
+  );
+}
+
 export function applyAspectInvocation(
   roll: FateDiceResult,
   effect: "bonus_2" | "reroll",

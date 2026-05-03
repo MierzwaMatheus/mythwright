@@ -48,11 +48,34 @@ export default defineSchema({
 
   scenes: defineTable({
     campaignId: v.id("campaigns"),
-  }).index("by_campaign", ["campaignId"]),
+    title: v.string(),
+    description: v.optional(v.string()),
+    status: v.union(v.literal("inactive"), v.literal("active"), v.literal("completed")),
+    createdAt: v.number(),
+    endedAt: v.optional(v.number()),
+    locationId: v.optional(v.id("entities")),
+    presentEntityIds: v.optional(v.array(v.id("entities"))),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_created", ["campaignId", "createdAt"]),
 
   messages: defineTable({
     campaignId: v.id("campaigns"),
-  }).index("by_campaign", ["campaignId"]),
+    sceneId: v.optional(v.id("scenes")),
+    role: v.union(v.literal("player"), v.literal("gm"), v.literal("system")),
+    content: v.string(),
+    clientMessageId: v.string(),
+    status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed")),
+    createdAt: v.optional(v.number()),
+    finalizedAt: v.optional(v.number()),
+    toolCalls: v.optional(v.array(v.object({
+      toolName: v.string(),
+      toolParams: v.any(),
+      toolResult: v.any(),
+      executedAt: v.number(),
+    }))),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"])
+    .index("by_scene_and_createdAt", ["sceneId", "createdAt"]),
 
   entities: defineTable({
     campaignId: v.id("campaigns"),
@@ -66,21 +89,25 @@ export default defineSchema({
     name: v.string(),
     visibility: v.union(v.literal("hidden"), v.literal("known")),
     description: v.string(),
-  }).index("by_campaign", ["campaignId"]),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_and_visibility", ["campaignId", "visibility"])
+    .index("by_campaign_and_type", ["campaignId", "type"]),
 
   facts: defineTable({
     campaignId: v.id("campaigns"),
     content: v.string(),
     visibility: v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known")),
     relatedEntityIds: v.optional(v.array(v.id("entities"))),
-  }).index("by_campaign", ["campaignId"]),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_and_visibility", ["campaignId", "visibility"]),
 
   triggers: defineTable({
     campaignId: v.id("campaigns"),
     description: v.string(),
     scope: v.string(),
     effects: v.array(v.object({ type: v.string(), payload: v.any() })),
-    status: v.union(v.literal("armed"), v.literal("disabled")),
+    status: v.union(v.literal("armed"), v.literal("disabled"), v.literal("fired")),
+    firedAt: v.optional(v.number()),
   }).index("by_campaign", ["campaignId"]),
 
   summaries: defineTable({
@@ -100,4 +127,30 @@ export default defineSchema({
     messageId: v.optional(v.id("messages")),
     reason: v.optional(v.string()),
   }).index("by_character", ["characterId"]),
+
+  sceneAspects: defineTable({
+    sceneId: v.id("scenes"),
+    text: v.string(),
+    freeInvokes: v.number(),
+  }).index("by_scene", ["sceneId"]),
+
+  aspectInvocations: defineTable({
+    aspectId: v.id("sceneAspects"),
+    targetRollId: v.id("diceRolls"),
+    effect: v.union(v.literal("bonus_2"), v.literal("reroll")),
+    payerId: v.id("characters"),
+    usesFreeInvoke: v.boolean(),
+    invokedAt: v.number(),
+  }).index("by_aspect", ["aspectId"]),
+
+  compels: defineTable({
+    campaignId: v.id("campaigns"),
+    aspectId: v.id("sceneAspects"),
+    characterId: v.id("characters"),
+    complication: v.string(),
+    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("refused")),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_character", ["characterId"]),
 });

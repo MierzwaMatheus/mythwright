@@ -606,6 +606,21 @@ describe("campaigns.deleteCampaign", () => {
             effects: [],
             status: "armed",
           });
+        } else if (table === "scenes") {
+          await ctx.db.insert(table, {
+            campaignId,
+            title: "Cena de Teste",
+            status: "inactive",
+            createdAt: Date.now(),
+          });
+        } else if (table === "messages") {
+          await ctx.db.insert(table, {
+            campaignId,
+            role: "gm",
+            content: "Mensagem de teste.",
+            clientMessageId: "test-msg-cascade",
+            status: "pending",
+          });
         } else {
           await ctx.db.insert(table, { campaignId });
         }

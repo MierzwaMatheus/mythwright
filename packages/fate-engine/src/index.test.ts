@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rollFateDice, calculateOutcome, applyAspectInvocation, calculateStress } from "./index.js";
-import type { FateDie, StressTrack } from "./index.js";
+import { rollFateDice, calculateOutcome, applyAspectInvocation, calculateStress, filterTriggerCandidates } from "./index.js";
+import type { FateDie, StressTrack, TriggerCandidate } from "./index.js";
 
 describe("rollFateDice", () => {
   // Caso 1: Determinismo
@@ -240,5 +240,69 @@ describe("calculateStress", () => {
     };
     const result = calculateStress(3, track);
     expect(result).toEqual({ canAbsorb: true, boxToMark: 3, requiresConsequence: false });
+  });
+});
+
+describe("filterTriggerCandidates", () => {
+  // Caso 1: triggers armed + scope global passam
+  it("returns all armed global triggers regardless of currentSceneId", () => {
+    const triggers: TriggerCandidate[] = [
+      { id: "t1", status: "armed", scope: "global" },
+      { id: "t2", status: "armed", scope: "global" },
+    ];
+    const result = filterTriggerCandidates(triggers, "scene-abc");
+    expect(result).toEqual(triggers);
+  });
+
+  // Caso 2: apenas scope === currentSceneId passa; outros sceneIds sao excluidos
+  it("returns armed triggers matching currentSceneId and excludes other scene scopes", () => {
+    const triggers: TriggerCandidate[] = [
+      { id: "t1", status: "armed", scope: "scene-abc" },
+      { id: "t2", status: "armed", scope: "scene-xyz" },
+    ];
+    const result = filterTriggerCandidates(triggers, "scene-abc");
+    expect(result).toEqual([{ id: "t1", status: "armed", scope: "scene-abc" }]);
+  });
+
+  // Caso 3: disabled sao excluidos independente do scope
+  it("excludes disabled triggers regardless of scope", () => {
+    const triggers: TriggerCandidate[] = [
+      { id: "t1", status: "disabled", scope: "global" },
+      { id: "t2", status: "disabled", scope: "scene-abc" },
+    ];
+    const result = filterTriggerCandidates(triggers, "scene-abc");
+    expect(result).toEqual([]);
+  });
+
+  // Caso 4: fired sao excluidos independente do scope
+  it("excludes fired triggers regardless of scope", () => {
+    const triggers: TriggerCandidate[] = [
+      { id: "t1", status: "fired", scope: "global" },
+      { id: "t2", status: "fired", scope: "scene-abc" },
+    ];
+    const result = filterTriggerCandidates(triggers, "scene-abc");
+    expect(result).toEqual([]);
+  });
+
+  // Caso implicito A: lista vazia retorna lista vazia
+  it("returns empty array when triggers list is empty", () => {
+    const result = filterTriggerCandidates([], "scene-abc");
+    expect(result).toEqual([]);
+  });
+
+  // Caso implicito B: mix de todos os casos retorna apenas os armed+global e armed+currentSceneId
+  it("returns only armed+global and armed+currentSceneId from a mixed list", () => {
+    const triggers: TriggerCandidate[] = [
+      { id: "t1", status: "armed", scope: "global" },
+      { id: "t2", status: "armed", scope: "scene-abc" },
+      { id: "t3", status: "armed", scope: "scene-xyz" },
+      { id: "t4", status: "disabled", scope: "global" },
+      { id: "t5", status: "fired", scope: "scene-abc" },
+    ];
+    const result = filterTriggerCandidates(triggers, "scene-abc");
+    expect(result).toEqual([
+      { id: "t1", status: "armed", scope: "global" },
+      { id: "t2", status: "armed", scope: "scene-abc" },
+    ]);
   });
 });
