@@ -9,4 +9,20 @@ export default defineSchema({
     tokenIdentifier: v.string(),
     encryptedOpenRouterKey: v.optional(v.string()),
   }).index("by_token", ["tokenIdentifier"]),
+
+  campaigns: defineTable({
+    userId: v.id("users"),
+    name: v.string(),
+    premise: v.string(),
+    tone: v.string(),
+    expectedDuration: v.union(v.literal("one-shot"), v.literal("medium"), v.literal("long")),
+    status: v.union(
+      v.literal("setup"),
+      v.literal("active"),
+      v.literal("paused"),
+      v.literal("archived"),
+    ),
+    createdAt: v.number(),
+    lastActivityAt: v.number(),
+  }).index("by_user", ["userId"]),
 });
