@@ -142,3 +142,85 @@ describe("messages.appendMessageTokens", () => {
     ).rejects.toThrow();
   });
 });
+
+describe("messages.finalizeMessage", () => {
+  it("conteúdo parcial sobrevive ao status failed", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupCampaign(t);
+
+    const messageId = await identity.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm" as const,
+      content: "Início da mensagem",
+      clientMessageId: "client-finalize-001",
+    });
+
+    await identity.mutation(api.messages.appendMessageTokens, {
+      messageId: messageId as Id<"messages">,
+      tokens: " parcial...",
+    });
+
+    await identity.mutation(api.messages.finalizeMessage, {
+      messageId: messageId as Id<"messages">,
+      status: "failed",
+    });
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as Id<"messages">);
+      expect(msg).not.toBeNull();
+      expect(msg!.content).toBe("Início da mensagem parcial...");
+      expect(msg!.status).toBe("failed");
+      expect(msg!.finalizedAt).toBeDefined();
+    });
+  });
+
+  it("atualiza status para complete e seta finalizedAt", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupCampaign(t);
+
+    const messageId = await identity.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm" as const,
+      content: "Mensagem completa.",
+      clientMessageId: "client-finalize-002",
+    });
+
+    const before = Date.now();
+
+    await identity.mutation(api.messages.finalizeMessage, {
+      messageId: messageId as Id<"messages">,
+      status: "complete",
+    });
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as Id<"messages">);
+      expect(msg).not.toBeNull();
+      expect(msg!.status).toBe("complete");
+      expect(msg!.finalizedAt).toBeDefined();
+      expect(msg!.finalizedAt!).toBeGreaterThanOrEqual(before);
+    });
+  });
+
+  it("lança erro ao tentar finalizar messageId inexistente", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupCampaign(t);
+
+    const messageId = await identity.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm" as const,
+      content: "Temporária",
+      clientMessageId: "client-finalize-999",
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.delete(messageId as Id<"messages">);
+    });
+
+    await expect(
+      identity.mutation(api.messages.finalizeMessage, {
+        messageId: messageId as Id<"messages">,
+        status: "complete",
+      }),
+    ).rejects.toThrow();
+  });
+});

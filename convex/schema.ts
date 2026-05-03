@@ -63,7 +63,8 @@ export default defineSchema({
     role: v.union(v.literal("player"), v.literal("gm"), v.literal("system")),
     content: v.string(),
     clientMessageId: v.string(),
-    status: v.literal("pending"),
+    status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed")),
+    finalizedAt: v.optional(v.number()),
   }).index("by_campaign", ["campaignId"])
     .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"]),
 

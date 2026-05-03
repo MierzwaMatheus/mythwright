@@ -30,6 +30,23 @@ export const createMessage = mutation({
   },
 });
 
+export const finalizeMessage = mutation({
+  args: {
+    messageId: v.id("messages"),
+    status: v.union(v.literal("complete"), v.literal("failed")),
+  },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    if (message === null) {
+      throw new Error(`Message not found: ${args.messageId}`);
+    }
+    await ctx.db.patch(args.messageId, {
+      status: args.status,
+      finalizedAt: Date.now(),
+    });
+  },
+});
+
 export const appendMessageTokens = mutation({
   args: {
     messageId: v.id("messages"),
