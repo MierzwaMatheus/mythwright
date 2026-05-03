@@ -31,6 +31,19 @@ export default defineSchema({
 
   characters: defineTable({
     campaignId: v.id("campaigns"),
+    name: v.string(),
+    aspects: v.array(v.string()),
+    skills: v.record(v.string(), v.number()),
+    stunts: v.array(v.string()),
+    fatePoints: v.number(),
+    stress: v.object({
+      physical: v.array(v.boolean()),
+      mental: v.array(v.boolean()),
+    }),
+    consequences: v.array(v.object({
+      severity: v.union(v.literal("mild"), v.literal("moderate"), v.literal("severe")),
+      description: v.string(),
+    })),
   }).index("by_campaign", ["campaignId"]),
 
   scenes: defineTable({

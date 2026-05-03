@@ -573,7 +573,20 @@ describe("campaigns.deleteCampaign", () => {
 
     await t.run(async (ctx) => {
       for (const table of childTables) {
-        await ctx.db.insert(table, { campaignId });
+        if (table === "characters") {
+          await ctx.db.insert(table, {
+            campaignId,
+            name: "Personagem Teste",
+            aspects: [],
+            skills: {},
+            stunts: [],
+            fatePoints: 3,
+            stress: { physical: [], mental: [] },
+            consequences: [],
+          });
+        } else {
+          await ctx.db.insert(table, { campaignId });
+        }
       }
     });
 
