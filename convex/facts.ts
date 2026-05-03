@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, MutationCtx } from "./_generated/server";
+import { mutation, query, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 
@@ -19,6 +19,35 @@ const VALID_TRANSITIONS: Record<string, string[]> = {
   rumored: ["known"],
   known: [],
 };
+
+export const listFacts = query({
+  args: {
+    campaignId: v.id("campaigns"),
+    visibility: v.optional(v.union(
+      v.literal("hidden"),
+      v.literal("rumored"),
+      v.literal("known"),
+    )),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new ConvexError("Not authenticated");
+
+    if (args.visibility !== undefined) {
+      return await ctx.db
+        .query("facts")
+        .withIndex("by_campaign_and_visibility", (q) =>
+          q.eq("campaignId", args.campaignId).eq("visibility", args.visibility!),
+        )
+        .take(100);
+    }
+
+    return await ctx.db
+      .query("facts")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .take(100);
+  },
+});
 
 export const changeFactVisibility = mutation({
   args: {
