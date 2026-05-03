@@ -2,6 +2,7 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query, internalMutation, internalQuery, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 
 async function assertCampaignOwnership(
   ctx: MutationCtx,
@@ -82,12 +83,14 @@ export const createFactInternal = internalMutation({
     relatedEntityIds: v.optional(v.array(v.id("entities"))),
   },
   handler: async (ctx, args) => {
-    return await ctx.db.insert("facts", {
+    const factId = await ctx.db.insert("facts", {
       campaignId: args.campaignId,
       content: args.content,
       visibility: args.visibility,
       relatedEntityIds: args.relatedEntityIds,
     });
+    await ctx.scheduler.runAfter(0, internal.lib.embedding.embedFact, { factId });
+    return factId;
   },
 });
 
@@ -98,6 +101,16 @@ export const getFactsByCampaignInternal = internalQuery({
       .query("facts")
       .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
       .take(100);
+  },
+});
+
+export const setFactEmbedding = internalMutation({
+  args: {
+    factId: v.id("facts"),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.factId, { embedding: args.embedding });
   },
 });
 
@@ -112,11 +125,13 @@ export const createFact = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new ConvexError("Not authenticated");
     await assertCampaignOwnership(ctx, args.campaignId, user._id);
-    return await ctx.db.insert("facts", {
+    const factId = await ctx.db.insert("facts", {
       campaignId: args.campaignId,
       content: args.content,
       visibility: args.visibility,
       relatedEntityIds: args.relatedEntityIds,
     });
+    await ctx.scheduler.runAfter(0, internal.lib.embedding.embedFact, { factId });
+    return factId;
   },
 });
