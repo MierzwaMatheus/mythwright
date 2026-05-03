@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, internalMutation, MutationCtx } from "./_generated/server";
+import { mutation, query, MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
@@ -53,15 +53,6 @@ export const listScenes = query({
   },
 });
 
-export const summarizeScene = internalMutation({
-  args: {
-    sceneId: v.id("scenes"),
-  },
-  handler: async (_ctx, _args) => {
-    // stub — será implementado futuramente
-    return null;
-  },
-});
 
 export const changeScene = mutation({
   args: {
@@ -100,7 +91,7 @@ export const changeScene = mutation({
       presentEntityIds: args.presentEntityIds,
     });
 
-    await ctx.scheduler.runAfter(0, internal.scenes.summarizeScene, {
+    await ctx.scheduler.runAfter(0, internal.summarizeScene.summarizeScene, {
       sceneId: activeScene._id,
     });
 
