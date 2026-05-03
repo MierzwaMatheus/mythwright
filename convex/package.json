@@ -1,0 +1,14 @@
+{
+  "name": "mythwright-convex",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "convex-test": "latest",
+    "vitest": "latest",
+    "@edge-runtime/vm": "latest"
+  }
+}
