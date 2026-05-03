@@ -584,6 +584,14 @@ describe("campaigns.deleteCampaign", () => {
             stress: { physical: [], mental: [] },
             consequences: [],
           });
+        } else if (table === "entities") {
+          await ctx.db.insert(table, {
+            campaignId,
+            type: "npc",
+            name: "Entidade Teste",
+            visibility: "known",
+            description: "Descrição de teste.",
+          });
         } else {
           await ctx.db.insert(table, { campaignId });
         }

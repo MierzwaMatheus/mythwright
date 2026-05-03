@@ -56,6 +56,16 @@ export default defineSchema({
 
   entities: defineTable({
     campaignId: v.id("campaigns"),
+    type: v.union(
+      v.literal("npc"),
+      v.literal("location"),
+      v.literal("faction"),
+      v.literal("item"),
+      v.literal("concept"),
+    ),
+    name: v.string(),
+    visibility: v.union(v.literal("hidden"), v.literal("known")),
+    description: v.string(),
   }).index("by_campaign", ["campaignId"]),
 
   facts: defineTable({
