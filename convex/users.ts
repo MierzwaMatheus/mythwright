@@ -1,5 +1,6 @@
 import { mutation, query } from "./_generated/server";
-import { v } from "convex/values";
+import { v, ConvexError } from "convex/values";
+import { encryptValue, decryptValue } from "./lib/crypto";
 
 export const upsertFromAuth = mutation({
   args: {
@@ -43,9 +44,53 @@ export const upsertFromAuth = mutation({
   },
 });
 
+export const saveOpenRouterKey = mutation({
+  args: { key: v.string() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      throw new ConvexError("Not authenticated");
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+
+    if (!user) {
+      throw new ConvexError("User not found");
+    }
+
+    const encryptedOpenRouterKey = await encryptValue(args.key);
+    await ctx.db.patch(user._id, { encryptedOpenRouterKey });
+  },
+});
+
+export const getMyOpenRouterKey = query({
+  args: {},
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) {
+      return null;
+    }
+
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+      .unique();
+
+    if (!user || !user.encryptedOpenRouterKey) {
+      return null;
+    }
+
+    return decryptValue(user.encryptedOpenRouterKey);
+  },
+});
+
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("users").take(100);
+    const users = await ctx.db.query("users").take(100);
+    return users.map(({ encryptedOpenRouterKey: _omit, ...rest }) => rest);
   },
 });

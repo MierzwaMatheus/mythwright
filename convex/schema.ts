@@ -7,5 +7,6 @@ export default defineSchema({
     displayName: v.string(),
     avatar: v.optional(v.string()),
     tokenIdentifier: v.string(),
+    encryptedOpenRouterKey: v.optional(v.string()),
   }).index("by_token", ["tokenIdentifier"]),
 });
