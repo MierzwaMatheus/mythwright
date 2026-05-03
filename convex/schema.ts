@@ -48,7 +48,12 @@ export default defineSchema({
 
   scenes: defineTable({
     campaignId: v.id("campaigns"),
-  }).index("by_campaign", ["campaignId"]),
+    title: v.string(),
+    description: v.optional(v.string()),
+    status: v.union(v.literal("inactive"), v.literal("active"), v.literal("completed")),
+    createdAt: v.number(),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_created", ["campaignId", "createdAt"]),
 
   messages: defineTable({
     campaignId: v.id("campaigns"),
