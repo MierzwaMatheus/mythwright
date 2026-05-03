@@ -60,7 +60,12 @@ export default defineSchema({
 
   messages: defineTable({
     campaignId: v.id("campaigns"),
-  }).index("by_campaign", ["campaignId"]),
+    role: v.union(v.literal("player"), v.literal("gm"), v.literal("system")),
+    content: v.string(),
+    clientMessageId: v.string(),
+    status: v.literal("pending"),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_and_clientMessageId", ["campaignId", "clientMessageId"]),
 
   entities: defineTable({
     campaignId: v.id("campaigns"),

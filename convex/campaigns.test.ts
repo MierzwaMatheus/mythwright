@@ -613,6 +613,14 @@ describe("campaigns.deleteCampaign", () => {
             status: "inactive",
             createdAt: Date.now(),
           });
+        } else if (table === "messages") {
+          await ctx.db.insert(table, {
+            campaignId,
+            role: "gm",
+            content: "Mensagem de teste.",
+            clientMessageId: "test-msg-cascade",
+            status: "pending",
+          });
         } else {
           await ctx.db.insert(table, { campaignId });
         }
