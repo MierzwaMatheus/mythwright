@@ -64,7 +64,7 @@ export default defineSchema({
     role: v.union(v.literal("player"), v.literal("gm"), v.literal("system")),
     content: v.string(),
     clientMessageId: v.string(),
-    status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed")),
+    status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed"), v.literal("leaked")),
     createdAt: v.optional(v.number()),
     finalizedAt: v.optional(v.number()),
     toolCalls: v.optional(v.array(v.object({
