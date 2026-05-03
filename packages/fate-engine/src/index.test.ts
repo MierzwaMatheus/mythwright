@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { rollFateDice } from "./index.js";
+import { rollFateDice, calculateOutcome } from "./index.js";
 import type { FateDie } from "./index.js";
 
 describe("rollFateDice", () => {
@@ -53,5 +53,43 @@ describe("rollFateDice", () => {
     const resultA = rollFateDice("seed-alpha-111", 0);
     const resultB = rollFateDice("seed-beta-999", 0);
     expect(resultA.dice).not.toEqual(resultB.dice);
+  });
+});
+
+describe("calculateOutcome", () => {
+  // Bordas de failure
+  it("returns failure when difference is -1", () => {
+    expect(calculateOutcome(2, 3)).toBe("failure");
+  });
+
+  it("returns failure when difference is very negative", () => {
+    expect(calculateOutcome(0, 10)).toBe("failure");
+  });
+
+  // Tie
+  it("returns tie when difference is 0", () => {
+    expect(calculateOutcome(4, 4)).toBe("tie");
+  });
+
+  it("returns tie when both are zero", () => {
+    expect(calculateOutcome(0, 0)).toBe("tie");
+  });
+
+  // Bordas de success
+  it("returns success when difference is +1", () => {
+    expect(calculateOutcome(4, 3)).toBe("success");
+  });
+
+  it("returns success when difference is +2", () => {
+    expect(calculateOutcome(5, 3)).toBe("success");
+  });
+
+  // Bordas de success_with_style
+  it("returns success_with_style when difference is +3", () => {
+    expect(calculateOutcome(6, 3)).toBe("success_with_style");
+  });
+
+  it("returns success_with_style when difference is very large", () => {
+    expect(calculateOutcome(10, 0)).toBe("success_with_style");
   });
 });

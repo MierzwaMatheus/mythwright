@@ -26,6 +26,16 @@ function stateToFateDie(state: number): FateDie {
   return 1;
 }
 
+export type FateOutcome = "failure" | "tie" | "success" | "success_with_style";
+
+export function calculateOutcome(total: number, opposition: number): FateOutcome {
+  const diff = total - opposition;
+  if (diff <= -1) return "failure";
+  if (diff === 0) return "tie";
+  if (diff <= 2) return "success";
+  return "success_with_style";
+}
+
 export function rollFateDice(seed: string, skillLevel: number): FateDiceResult {
   let state = hashSeed(seed);
 
