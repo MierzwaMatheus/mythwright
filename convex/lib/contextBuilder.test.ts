@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { buildCharacterBlock, buildSceneBlock } from "./contextBuilder";
+import { buildCharacterBlock, buildSceneBlock, buildWorldStateBlock } from "./contextBuilder";
 
 const baseCharacter = {
   _id: "characters:abc123" as any,
@@ -160,5 +160,106 @@ describe("buildSceneBlock", () => {
     const result = buildSceneBlock(baseScene, [knownNpc], []);
 
     expect(result.aspects).toEqual([]);
+  });
+});
+
+describe("buildWorldStateBlock", () => {
+  const hiddenFact = {
+    content: "O rei é um vampiro",
+    visibility: "hidden" as const,
+  };
+
+  const rumoredFact = {
+    content: "Dizem que há um dragão nas montanhas",
+    visibility: "rumored" as const,
+  };
+
+  const knownFact = {
+    content: "A guerra terminou há três anos",
+    visibility: "known" as const,
+  };
+
+  const hiddenEntity = {
+    name: "Culto das Sombras",
+    visibility: "hidden" as const,
+    description: "Organização secreta que controla o reino",
+    type: "faction" as const,
+    secrets: "Eles planejam invocar um deus antigo",
+  };
+
+  const knownEntity = {
+    name: "Guilda dos Mercadores",
+    visibility: "known" as const,
+    description: "Associação de comerciantes influentes",
+    type: "faction" as const,
+  };
+
+  test("isolamento critico: fatos e entidades hidden nunca vazam para player_knowledge", () => {
+    const result = buildWorldStateBlock(
+      [hiddenFact, rumoredFact, knownFact],
+      [hiddenEntity, knownEntity]
+    );
+
+    // player_knowledge nao deve conter nada hidden
+    const playerFactContents = result.player_knowledge.facts.map(
+      (f: { content: string }) => f.content
+    );
+    expect(playerFactContents).not.toContain(hiddenFact.content);
+
+    const playerEntityNames = result.player_knowledge.entities.map(
+      (e: { name: string }) => e.name
+    );
+    expect(playerEntityNames).not.toContain(hiddenEntity.name);
+
+    // world_state_internal deve conter hidden e rumored
+    const internalFactContents = result.world_state_internal.facts.map(
+      (f: { content: string }) => f.content
+    );
+    expect(internalFactContents).toContain(hiddenFact.content);
+    expect(internalFactContents).toContain(rumoredFact.content);
+    expect(internalFactContents).not.toContain(knownFact.content);
+
+    // world_state_internal deve conter entidades hidden
+    const internalEntityNames = result.world_state_internal.entities.map(
+      (e: { name: string }) => e.name
+    );
+    expect(internalEntityNames).toContain(hiddenEntity.name);
+    expect(internalEntityNames).not.toContain(knownEntity.name);
+  });
+
+  test("player_knowledge.entities contem apenas name e description", () => {
+    const result = buildWorldStateBlock([], [knownEntity]);
+
+    expect(result.player_knowledge.entities[0]).toEqual({
+      name: "Guilda dos Mercadores",
+      description: "Associação de comerciantes influentes",
+    });
+    expect(result.player_knowledge.entities[0]).not.toHaveProperty("type");
+    expect(result.player_knowledge.entities[0]).not.toHaveProperty("visibility");
+  });
+
+  test("world_state_internal.entities inclui todos os campos da entidade hidden", () => {
+    const result = buildWorldStateBlock([], [hiddenEntity]);
+
+    const entity = result.world_state_internal.entities[0];
+    expect(entity.name).toBe("Culto das Sombras");
+    expect(entity.description).toBe("Organização secreta que controla o reino");
+    expect(entity.secrets).toBe("Eles planejam invocar um deus antigo");
+  });
+
+  test("arrays vazios retornam blocos com arrays vazios", () => {
+    const result = buildWorldStateBlock([], []);
+
+    expect(result.world_state_internal.facts).toEqual([]);
+    expect(result.world_state_internal.entities).toEqual([]);
+    expect(result.player_knowledge.facts).toEqual([]);
+    expect(result.player_knowledge.entities).toEqual([]);
+  });
+
+  test("player_knowledge.facts contem apenas fatos known", () => {
+    const result = buildWorldStateBlock([hiddenFact, rumoredFact, knownFact], []);
+
+    expect(result.player_knowledge.facts).toHaveLength(1);
+    expect(result.player_knowledge.facts[0].content).toBe(knownFact.content);
   });
 });

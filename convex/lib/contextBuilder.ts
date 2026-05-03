@@ -60,6 +60,31 @@ export function buildSceneBlock(
   };
 }
 
+export function buildWorldStateBlock(
+  facts: Fact[],
+  entities: Entity[]
+): {
+  world_state_internal: { facts: { content: string }[]; entities: Entity[] };
+  player_knowledge: { facts: { content: string }[]; entities: { name: string; description: string }[] };
+} {
+  return {
+    world_state_internal: {
+      facts: facts
+        .filter((f) => f.visibility === "hidden" || f.visibility === "rumored")
+        .map((f) => ({ content: f.content })),
+      entities: entities.filter((e) => e.visibility === "hidden"),
+    },
+    player_knowledge: {
+      facts: facts
+        .filter((f) => f.visibility === "known")
+        .map((f) => ({ content: f.content })),
+      entities: entities
+        .filter((e) => e.visibility === "known")
+        .map((e) => ({ name: e.name, description: e.description })),
+    },
+  };
+}
+
 export function buildCharacterBlock(character: Character): string {
   return JSON.stringify({
     aspects: character.aspects,
