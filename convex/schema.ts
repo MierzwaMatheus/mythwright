@@ -52,6 +52,9 @@ export default defineSchema({
     description: v.optional(v.string()),
     status: v.union(v.literal("inactive"), v.literal("active"), v.literal("completed")),
     createdAt: v.number(),
+    endedAt: v.optional(v.number()),
+    locationId: v.optional(v.id("entities")),
+    presentEntityIds: v.optional(v.array(v.id("entities"))),
   }).index("by_campaign", ["campaignId"])
     .index("by_campaign_created", ["campaignId", "createdAt"]),
 

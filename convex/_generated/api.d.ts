@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as aspectInvocations from "../aspectInvocations.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characters from "../characters.js";
 import type * as consequences from "../consequences.js";
@@ -15,6 +16,7 @@ import type * as entities from "../entities.js";
 import type * as facts from "../facts.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_crypto from "../lib/crypto.js";
+import type * as sceneAspects from "../sceneAspects.js";
 import type * as scenes from "../scenes.js";
 import type * as stress from "../stress.js";
 import type * as triggers from "../triggers.js";
@@ -27,6 +29,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  aspectInvocations: typeof aspectInvocations;
   campaigns: typeof campaigns;
   characters: typeof characters;
   consequences: typeof consequences;
@@ -34,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   facts: typeof facts;
   "lib/auth": typeof lib_auth;
   "lib/crypto": typeof lib_crypto;
+  sceneAspects: typeof sceneAspects;
   scenes: typeof scenes;
   stress: typeof stress;
   triggers: typeof triggers;
