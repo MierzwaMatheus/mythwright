@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { describe, it, expect } from "vitest";
-import { buildAntiLeakPrompt } from "./antiLeak";
+import { buildAntiLeakPrompt, parseAntiLeakResponse } from "./antiLeak";
 
 describe("buildAntiLeakPrompt", () => {
   const gmResponse = "O cavaleiro derrotou o dragão e encontrou o tesouro perdido.";
@@ -31,5 +31,65 @@ describe("buildAntiLeakPrompt", () => {
     const prompt = buildAntiLeakPrompt(gmResponse, hiddenFacts);
 
     expect(prompt).toContain(gmResponse);
+  });
+});
+
+describe("parseAntiLeakResponse", () => {
+  it("retorna os dados corretamente quando JSON válido com vazou: true", () => {
+    const raw = JSON.stringify({
+      vazou: true,
+      facts: ["fact_001"],
+      trechos: ["O rei está morto"],
+    });
+
+    const result = parseAntiLeakResponse(raw);
+
+    expect(result).toEqual({
+      vazou: true,
+      facts: ["fact_001"],
+      trechos: ["O rei está morto"],
+    });
+  });
+
+  it("retorna os dados corretamente quando JSON válido com vazou: false", () => {
+    const raw = JSON.stringify({
+      vazou: false,
+      facts: [],
+      trechos: [],
+    });
+
+    const result = parseAntiLeakResponse(raw);
+
+    expect(result).toEqual({
+      vazou: false,
+      facts: [],
+      trechos: [],
+    });
+  });
+
+  it("retorna parseError quando JSON malformado", () => {
+    const raw = "{ isso não é json válido }";
+
+    const result = parseAntiLeakResponse(raw);
+
+    expect(result).toEqual({
+      vazou: false,
+      facts: [],
+      trechos: [],
+      parseError: true,
+    });
+  });
+
+  it("retorna parseError quando string vazia", () => {
+    const raw = "";
+
+    const result = parseAntiLeakResponse(raw);
+
+    expect(result).toEqual({
+      vazou: false,
+      facts: [],
+      trechos: [],
+      parseError: true,
+    });
   });
 });

@@ -1,3 +1,25 @@
+type AntiLeakResult = {
+  vazou: boolean;
+  facts: string[];
+  trechos: string[];
+  parseError?: boolean;
+};
+
+function parseErrorResult(): AntiLeakResult {
+  return { vazou: false, facts: [], trechos: [], parseError: true };
+}
+
+export function parseAntiLeakResponse(rawResponse: string): AntiLeakResult {
+  if (!rawResponse) return parseErrorResult();
+
+  try {
+    const parsed = JSON.parse(rawResponse);
+    return { vazou: parsed.vazou, facts: parsed.facts, trechos: parsed.trechos };
+  } catch {
+    return parseErrorResult();
+  }
+}
+
 function formatHiddenFacts(
   hiddenFacts: Array<{ id: string; content: string }>
 ): string {
