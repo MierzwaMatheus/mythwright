@@ -6,6 +6,16 @@ import { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { ConvexError } from "convex/values";
 
+type ChildTable =
+  | "characters"
+  | "scenes"
+  | "messages"
+  | "entities"
+  | "facts"
+  | "triggers"
+  | "summaries"
+  | "diceRolls";
+
 const modules = import.meta.glob("./**/*.ts");
 
 describe("campaigns.createCampaign", () => {
@@ -158,6 +168,303 @@ describe("campaigns.listCampaigns", () => {
 
     await expect(
       t.query(api.campaigns.listCampaigns, {})
+    ).rejects.toThrow();
+  });
+});
+
+describe("campaigns.updateCampaignStatus", () => {
+  const campaignInput = {
+    name: "A Maldição de Ironveil",
+    premise: "Heróis investigam desaparecimentos numa cidade mineira.",
+    tone: "dark fantasy",
+    expectedDuration: "medium" as const,
+  };
+
+  async function setupUserAndCampaign(t: ReturnType<typeof convexTest>, tokenIdentifier: string, email: string) {
+    const identity = t.withIdentity({ tokenIdentifier, email });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+    const campaignId = await identity.mutation(api.campaigns.createCampaign, campaignInput);
+    return { identity, campaignId: campaignId as Id<"campaigns"> };
+  }
+
+  it("transição setup → active é válida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u001", "u001@test.com");
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.status).toBe("active");
+    });
+  });
+
+  it("transição active → paused é válida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u002", "u002@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "paused" })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.status).toBe("paused");
+    });
+  });
+
+  it("transição paused → active é válida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u003", "u003@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "paused" });
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.status).toBe("active");
+    });
+  });
+
+  it("transição active → archived é válida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u004", "u004@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "archived" })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.status).toBe("archived");
+    });
+  });
+
+  it("transição paused → archived é válida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u005", "u005@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "paused" });
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "archived" })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.status).toBe("archived");
+    });
+  });
+
+  it("atualiza lastActivityAt após transição", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u006", "u006@test.com");
+
+    const beforeUpdate = await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      return campaign!.lastActivityAt;
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.patch(campaignId, { lastActivityAt: 1000 });
+    });
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign!.lastActivityAt).toBeGreaterThan(1000);
+    });
+  });
+
+  it("archived → active lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u007", "u007@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "archived" });
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("archived → paused lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u008", "u008@test.com");
+
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" });
+    await identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "archived" });
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "paused" })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("setup → paused lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u009", "u009@test.com");
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "paused" })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("setup → archived lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|u010", "u010@test.com");
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "archived" })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("campanha não encontrada lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|u011", email: "u011@test.com" });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+
+    const fakeCampaignId = "fake_campaign_id" as Id<"campaigns">;
+
+    await expect(
+      identity.mutation(api.campaigns.updateCampaignStatus, { campaignId: fakeCampaignId, newStatus: "active" })
+    ).rejects.toThrow();
+  });
+
+  it("usuário não autenticado lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|u012", "u012@test.com");
+
+    await expect(
+      t.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("usuário não dono da campanha lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|u013", "u013@test.com");
+
+    const otherIdentity = t.withIdentity({ tokenIdentifier: "token|u013b", email: "u013b@test.com" });
+    await otherIdentity.mutation(api.users.upsertFromAuth, { displayName: "Other GM" });
+
+    await expect(
+      otherIdentity.mutation(api.campaigns.updateCampaignStatus, { campaignId, newStatus: "active" })
+    ).rejects.toThrow(ConvexError);
+  });
+});
+
+describe("campaigns.deleteCampaign", () => {
+  const campaignInput = {
+    name: "Campanha para deletar",
+    premise: "Será deletada.",
+    tone: "dark",
+    expectedDuration: "one-shot" as const,
+  };
+
+  const childTables: ChildTable[] = [
+    "characters",
+    "scenes",
+    "messages",
+    "entities",
+    "facts",
+    "triggers",
+    "summaries",
+    "diceRolls",
+  ];
+
+  async function setupUserAndCampaign(
+    t: ReturnType<typeof convexTest>,
+    tokenIdentifier: string,
+    email: string,
+  ) {
+    const identity = t.withIdentity({ tokenIdentifier, email });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+    const campaignId = await identity.mutation(api.campaigns.createCampaign, campaignInput);
+    return { identity, campaignId: campaignId as Id<"campaigns"> };
+  }
+
+  it("deleta a campanha sem lançar erro", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|d001", "d001@test.com");
+
+    await expect(
+      identity.mutation(api.campaigns.deleteCampaign, { campaignId })
+    ).resolves.not.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId);
+      expect(campaign).toBeNull();
+    });
+  });
+
+  it("deleta todos os registros filhos em cascata", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|d002", "d002@test.com");
+
+    await t.run(async (ctx) => {
+      for (const table of childTables) {
+        await ctx.db.insert(table, { campaignId });
+      }
+    });
+
+    await identity.mutation(api.campaigns.deleteCampaign, { campaignId });
+
+    await t.run(async (ctx) => {
+      for (const table of childTables) {
+        const rows = await ctx.db
+          .query(table)
+          .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+          .collect();
+        expect(rows).toHaveLength(0);
+      }
+    });
+  });
+
+  it("deleta campanha sem registros filhos sem erro", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|d003", "d003@test.com");
+
+    await expect(
+      identity.mutation(api.campaigns.deleteCampaign, { campaignId })
+    ).resolves.not.toThrow();
+  });
+
+  it("usuário não autenticado lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|d004", "d004@test.com");
+
+    await expect(
+      t.mutation(api.campaigns.deleteCampaign, { campaignId })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("usuário não dono lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|d005", "d005@test.com");
+
+    const other = t.withIdentity({ tokenIdentifier: "token|d005b", email: "d005b@test.com" });
+    await other.mutation(api.users.upsertFromAuth, { displayName: "Other" });
+
+    await expect(
+      other.mutation(api.campaigns.deleteCampaign, { campaignId })
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("campanha inexistente lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|d006", email: "d006@test.com" });
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
+
+    const fakeId = "fake_campaign_id" as Id<"campaigns">;
+    await expect(
+      identity.mutation(api.campaigns.deleteCampaign, { campaignId: fakeId })
     ).rejects.toThrow();
   });
 });

@@ -26,4 +26,36 @@ export default defineSchema({
     lastActivityAt: v.number(),
   }).index("by_user", ["userId"])
     .index("by_user_activity", ["userId", "lastActivityAt"]),
+
+  characters: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  scenes: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  messages: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  entities: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  facts: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  triggers: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  summaries: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
+
+  diceRolls: defineTable({
+    campaignId: v.id("campaigns"),
+  }).index("by_campaign", ["campaignId"]),
 });
