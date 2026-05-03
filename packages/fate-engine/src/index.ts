@@ -103,7 +103,7 @@ export function applyAspectInvocation(
     throw new Error("seed is required for reroll");
   }
 
-  const diceSum = roll.dice.reduce((acc, d) => acc + d, 0);
+  const diceSum = roll.dice.reduce((acc: number, d) => acc + d, 0);
   const skillLevel = roll.total - diceSum;
   return rollFateDice(seed, skillLevel);
 }

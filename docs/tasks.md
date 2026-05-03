@@ -45,7 +45,7 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 ### Higiene — G-026
 
-- [ ] Remover ou restringir a admin a query `users.list` em `convex/users.ts:88-95`
+- [x] Remover ou restringir a admin a query `users.list` em `convex/users.ts:88-95`
 
 ---
 
@@ -55,23 +55,23 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/02-technical-architecture.md` §5 (embedding e vector search) e `@docs/01-gap-report.md` G-009
 
-- [ ] Criar `convex/lib/embedding.ts` com `internalAction generateEmbedding(text: string): number[]` chamando `bge-m3` via OpenRouter/Together AI
-- [ ] Criar wrapper `vectorSearch(ctx, table, queryEmbedding, filters, k)` usando `ctx.vectorSearch` (só funciona em actions)
-- [ ] Ao criar `fact`: agendar action que preenche `facts.embedding`
-- [ ] Ao editar `fact`: regenerar embedding
-- [ ] Ao criar `entity`: agendar action que preenche `entities.embedding`
-- [ ] Ao criar `trigger`: agendar action que preenche `triggers.embedding`
-- [ ] Testar `generateEmbedding` com mock do provider (deve retornar array de 1024 floats)
-- [ ] Testar que hook de criação de fact dispara e persiste embedding
+- [x] Criar `convex/lib/embedding.ts` com `internalAction generateEmbedding(text: string): number[]` chamando `bge-m3` via OpenRouter/Together AI
+- [x] Criar wrapper `vectorSearch(ctx, table, queryEmbedding, filters, k)` usando `ctx.vectorSearch` (só funciona em actions)
+- [x] Ao criar `fact`: agendar action que preenche `facts.embedding`
+- [x] Ao editar `fact`: regenerar embedding
+- [x] Ao criar `entity`: agendar action que preenche `entities.embedding`
+- [x] Ao criar `trigger`: agendar action que preenche `triggers.embedding`
+- [x] Testar `generateEmbedding` com mock do provider (deve retornar array de 1024 floats)
+- [x] Testar que hook de criação de fact dispara e persiste embedding
 
 ### Gatilhos Operacionais — G-004
 
 > Contexto: `@docs/02-technical-architecture.md` §6.3 (Estágio 3 — resolução de gatilhos) e `@docs/01-gap-report.md` G-004
 
-- [ ] Criar `convex/prompts/triggerClassifier.ts` com `buildTriggerClassifierPrompt(playerMessage, candidates)` e parser de resposta — consultar `@docs/03-prompt-library.md` §2
-- [ ] Criar `convex/actions/classifyTriggers.ts` com `internalAction classifyTriggers(playerMessage, candidates)` que chama LLM utilitário e retorna IDs de gatilhos ativados
-- [ ] Testar `classifyTriggers` com mock de LLM para cenários de ativação e não-ativação
-- [ ] Testar integração com `filterTriggerCandidates` do `fate-engine` (já existe em `packages/fate-engine`)
+- [x] Criar `convex/prompts/triggerClassifier.ts` com `buildTriggerClassifierPrompt(playerMessage, candidates)` e parser de resposta — consultar `@docs/03-prompt-library.md` §2
+- [x] Criar `convex/actions/classifyTriggers.ts` com `internalAction classifyTriggers(playerMessage, candidates)` que chama LLM utilitário e retorna IDs de gatilhos ativados
+- [x] Testar `classifyTriggers` com mock de LLM para cenários de ativação e não-ativação
+- [x] Testar integração com `filterTriggerCandidates` do `fate-engine` (já existe em `packages/fate-engine`)
 
 ### Resumos Hierárquicos — G-013
 

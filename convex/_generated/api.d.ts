@@ -11,6 +11,7 @@
 import type * as aspectInvocations from "../aspectInvocations.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characters from "../characters.js";
+import type * as classifyTriggers from "../classifyTriggers.js";
 import type * as compels from "../compels.js";
 import type * as consequences from "../consequences.js";
 import type * as embedding from "../embedding.js";
@@ -27,6 +28,7 @@ import type * as messages from "../messages.js";
 import type * as processTurn from "../processTurn.js";
 import type * as prompts_antiLeak from "../prompts/antiLeak.js";
 import type * as prompts_factExtraction from "../prompts/factExtraction.js";
+import type * as prompts_triggerClassifier from "../prompts/triggerClassifier.js";
 import type * as sceneAspects from "../sceneAspects.js";
 import type * as scenes from "../scenes.js";
 import type * as stress from "../stress.js";
@@ -43,6 +45,7 @@ declare const fullApi: ApiFromModules<{
   aspectInvocations: typeof aspectInvocations;
   campaigns: typeof campaigns;
   characters: typeof characters;
+  classifyTriggers: typeof classifyTriggers;
   compels: typeof compels;
   consequences: typeof consequences;
   embedding: typeof embedding;
@@ -59,6 +62,7 @@ declare const fullApi: ApiFromModules<{
   processTurn: typeof processTurn;
   "prompts/antiLeak": typeof prompts_antiLeak;
   "prompts/factExtraction": typeof prompts_factExtraction;
+  "prompts/triggerClassifier": typeof prompts_triggerClassifier;
   sceneAspects: typeof sceneAspects;
   scenes: typeof scenes;
   stress: typeof stress;
