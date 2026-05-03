@@ -115,4 +115,13 @@ export default defineSchema({
     text: v.string(),
     freeInvokes: v.number(),
   }).index("by_scene", ["sceneId"]),
+
+  aspectInvocations: defineTable({
+    aspectId: v.id("sceneAspects"),
+    targetRollId: v.id("diceRolls"),
+    effect: v.union(v.literal("bonus_2"), v.literal("reroll")),
+    payerId: v.id("characters"),
+    usesFreeInvoke: v.boolean(),
+    invokedAt: v.number(),
+  }).index("by_aspect", ["aspectId"]),
 });
