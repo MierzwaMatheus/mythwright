@@ -4,7 +4,6 @@ import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const GM_MODEL = "openai/gpt-4o-mini";
 const MAX_REGENERATIONS = 2; // 3 tentativas no total (0, 1, 2)
 
 type ToolCallRecord = {
@@ -39,7 +38,7 @@ function parseLlmResponse(raw: string): ParsedLlmResponse {
   return { content: raw };
 }
 
-async function callLlm(playerMessageContent: string): Promise<string> {
+async function callLlm(playerMessageContent: string, model: string): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
@@ -47,7 +46,7 @@ async function callLlm(playerMessageContent: string): Promise<string> {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model: GM_MODEL,
+      model,
       messages: [{ role: "user", content: playerMessageContent }],
     }),
   });
@@ -102,8 +101,9 @@ export const processTurn = internalAction({
     | { success: false; reason: string }
     | { status: "awaiting_player_decision"; compelId: Id<"compels">; messageId: Id<"messages"> }
   > => {
+    const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, { campaignId: args.campaignId });
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
-      const rawLlmContent = await callLlm(args.playerMessageContent);
+      const rawLlmContent = await callLlm(args.playerMessageContent, llmConfig.narrativeModel);
       const { content: gmContent, toolCalls } = parseLlmResponse(rawLlmContent);
 
       // Detectar compel_aspect antes de persistir a mensagem normalmente
@@ -131,6 +131,7 @@ export const processTurn = internalAction({
 
       const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
         messageId,
+        campaignId: args.campaignId,
         hiddenFacts: args.hiddenFacts,
       });
 

@@ -28,7 +28,7 @@ type Scene = {
 
 type Entity = {
   name: string;
-  visibility: "hidden" | "known";
+  visibility: "hidden" | "rumored" | "known";
   description: string;
   type: "npc" | "location" | "faction" | "item" | "concept";
   [key: string]: unknown;

@@ -47,7 +47,8 @@ describe("triggers.createTrigger", () => {
     const triggerId = await identity.mutation(api.triggers.createTrigger, {
       campaignId,
       description: "Gatilho de cena específica.",
-      scope: "scene_001",
+      scope: "scene",
+      scopeRefId: "scene_001",
       effects: [
         { type: "spawn_npc", payload: { name: "Assassino" } },
         { type: "play_music", payload: { track: "danger" } },
@@ -59,7 +60,8 @@ describe("triggers.createTrigger", () => {
       expect(trigger).not.toBeNull();
       expect(trigger!.campaignId).toBe(campaignId);
       expect(trigger!.description).toBe("Gatilho de cena específica.");
-      expect(trigger!.scope).toBe("scene_001");
+      expect(trigger!.scope).toBe("scene");
+      expect(trigger!.scopeRefId).toBe("scene_001");
       expect(trigger!.status).toBe("armed");
       expect(trigger!.effects).toHaveLength(2);
       expect(trigger!.effects[0].type).toBe("spawn_npc");
@@ -357,12 +359,14 @@ describe("triggers.getArmedTriggersByScope", () => {
   async function createTrigger(
     identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
     campaignId: Id<"campaigns">,
-    scope: string,
+    scope: "global" | "scene" | "location",
+    scopeRefId?: string,
   ) {
     return identity.mutation(api.triggers.createTrigger, {
       campaignId,
       description: `Gatilho de ${scope}.`,
       scope,
+      scopeRefId,
       effects: [],
     });
   }
@@ -372,7 +376,7 @@ describe("triggers.getArmedTriggersByScope", () => {
     const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats001", "gats001@test.com");
 
     await createTrigger(identity, campaignId, "global");
-    await createTrigger(identity, campaignId, "scene_001");
+    await createTrigger(identity, campaignId, "scene", "scene_001");
 
     const results = await identity.query(api.triggers.getArmedTriggersByScope, {
       campaignId,
@@ -387,8 +391,8 @@ describe("triggers.getArmedTriggersByScope", () => {
     const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats002", "gats002@test.com");
 
     await createTrigger(identity, campaignId, "global");
-    await createTrigger(identity, campaignId, "scene_001");
-    await createTrigger(identity, campaignId, "scene_002");
+    await createTrigger(identity, campaignId, "scene", "scene_001");
+    await createTrigger(identity, campaignId, "scene", "scene_002");
 
     const results = await identity.query(api.triggers.getArmedTriggersByScope, {
       campaignId,
@@ -396,10 +400,10 @@ describe("triggers.getArmedTriggersByScope", () => {
     });
 
     expect(results).toHaveLength(2);
-    const scopes = results.map((r) => r.scope);
-    expect(scopes).toContain("global");
-    expect(scopes).toContain("scene_001");
-    expect(scopes).not.toContain("scene_002");
+    const scopeRefs = results.map((r) => r.scopeRefId ?? r.scope);
+    expect(scopeRefs).toContain("global");
+    expect(scopeRefs).toContain("scene_001");
+    expect(scopeRefs).not.toContain("scene_002");
   });
 
   it("não retorna gatilhos disabled mesmo que scope bata", async () => {

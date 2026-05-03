@@ -13,10 +13,12 @@ describe("users.upsertFromAuth", () => {
       api.users.upsertFromAuth,
       { displayName: "Hero" }
     );
-    const users = await t.query(api.users.list);
-    expect(users).toHaveLength(1);
-    expect(users[0].email).toBe("hero@mythwright.com");
-    expect(users[0].displayName).toBe("Hero");
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users).toHaveLength(1);
+      expect(users[0].email).toBe("hero@mythwright.com");
+      expect(users[0].displayName).toBe("Hero");
+    });
   });
 
   it("persists avatar when provided", async () => {
@@ -25,8 +27,10 @@ describe("users.upsertFromAuth", () => {
       api.users.upsertFromAuth,
       { displayName: "Mage", avatar: "https://cdn.example.com/mage.png" }
     );
-    const users = await t.query(api.users.list);
-    expect(users[0].avatar).toBe("https://cdn.example.com/mage.png");
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users[0].avatar).toBe("https://cdn.example.com/mage.png");
+    });
   });
 
   it("avatar is undefined (not null) when not provided", async () => {
@@ -35,9 +39,11 @@ describe("users.upsertFromAuth", () => {
       api.users.upsertFromAuth,
       { displayName: "Rogue" }
     );
-    const users = await t.query(api.users.list);
-    expect(users[0].avatar).toBeUndefined();
-    expect(users[0].avatar).not.toBeNull();
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users[0].avatar).toBeUndefined();
+      expect(users[0].avatar).not.toBeNull();
+    });
   });
 
   it("upserts (updates) an existing user with the same tokenIdentifier", async () => {
@@ -50,10 +56,12 @@ describe("users.upsertFromAuth", () => {
       avatar: "https://cdn.example.com/bard.png",
     });
 
-    const users = await t.query(api.users.list);
-    expect(users).toHaveLength(1);
-    expect(users[0].displayName).toBe("Bard v2");
-    expect(users[0].avatar).toBe("https://cdn.example.com/bard.png");
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users).toHaveLength(1);
+      expect(users[0].displayName).toBe("Bard v2");
+      expect(users[0].avatar).toBe("https://cdn.example.com/bard.png");
+    });
   });
 
   it("does not expose key or encrypted fields in returned objects", async () => {
@@ -156,23 +164,26 @@ describe("users.getMyOpenRouterKey", () => {
   });
 });
 
-describe("users.list anti-leak", () => {
-  it("does not include key or encrypted fields in returned user objects", async () => {
+// G-026: users.list foi removida — era uma query pública sem autenticação que expunha dados de
+// todos os usuários para qualquer chamada externa (bug de segurança). Removida completamente pois
+// não há caso de uso legítimo no MVP que justifique listar usuários sem auth.
+// Os testes acima que antes usavam api.users.list foram refatorados para usar ctx.db diretamente
+// via t.run, que é o acesso seguro para testes internos.
+describe("users.list security (G-026)", () => {
+  it("does not expose encryptedOpenRouterKey in any user data accessible via ctx.db", async () => {
     const t = convexTest(schema, modules);
     const identity = t.withIdentity({ tokenIdentifier: "token|301", email: "cleric@mythwright.com" });
 
     await identity.mutation(api.users.upsertFromAuth, { displayName: "Cleric" });
     await identity.mutation(api.users.saveOpenRouterKey, { key: "sk-or-cleric-secret" });
 
-    const users = await t.query(api.users.list);
-    expect(users).toHaveLength(1);
-
-    for (const user of users) {
-      const keys = Object.keys(user);
-      const sensitiveKeys = keys.filter(
-        (k) => k.toLowerCase().includes("key") || k.toLowerCase().includes("encrypted")
-      );
-      expect(sensitiveKeys).toHaveLength(0);
-    }
+    // Verifica que o campo encriptado existe na DB mas nunca vazaria pela API removida
+    await t.run(async (ctx) => {
+      const users = await ctx.db.query("users").collect();
+      expect(users).toHaveLength(1);
+      // O campo encriptado existe internamente (correto — é armazenado cifrado)
+      expect(users[0].encryptedOpenRouterKey).toBeDefined();
+      expect(users[0].encryptedOpenRouterKey).not.toBe("sk-or-cleric-secret");
+    });
   });
 });

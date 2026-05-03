@@ -18,6 +18,7 @@ import type * as facts from "../facts.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_contextBuilder from "../lib/contextBuilder.js";
 import type * as lib_crypto from "../lib/crypto.js";
+import type * as lib_llmConfig from "../lib/llmConfig.js";
 import type * as lib_tokenCounter from "../lib/tokenCounter.js";
 import type * as messages from "../messages.js";
 import type * as processTurn from "../processTurn.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/contextBuilder": typeof lib_contextBuilder;
   "lib/crypto": typeof lib_crypto;
+  "lib/llmConfig": typeof lib_llmConfig;
   "lib/tokenCounter": typeof lib_tokenCounter;
   messages: typeof messages;
   processTurn: typeof processTurn;

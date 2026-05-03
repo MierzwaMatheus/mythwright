@@ -605,6 +605,7 @@ describe("campaigns.deleteCampaign", () => {
             scope: "global",
             effects: [],
             status: "armed",
+            oneShot: false,
           });
         } else if (table === "scenes") {
           await ctx.db.insert(table, {
@@ -621,8 +622,38 @@ describe("campaigns.deleteCampaign", () => {
             clientMessageId: "test-msg-cascade",
             status: "pending",
           });
-        } else {
-          await ctx.db.insert(table, { campaignId });
+        } else if (table === "summaries") {
+          await ctx.db.insert(table, {
+            campaignId,
+            level: "scene",
+            content: "Sumário de teste.",
+            coversFrom: 0,
+            coversTo: 1000,
+            createdAt: Date.now(),
+          });
+        } else if (table === "diceRolls") {
+          const msgId = await ctx.db.insert("messages", {
+            campaignId,
+            role: "player",
+            content: "Ação.",
+            clientMessageId: "test-dice-cascade",
+            status: "complete",
+          });
+          await ctx.db.insert(table, {
+            campaignId,
+            messageId: msgId,
+            type: "overcome",
+            skillName: "Athletics",
+            skillLevel: 1,
+            invokedAspectIds: [],
+            bonus: 0,
+            diceResults: [0, 0, 0, 0],
+            diceTotal: 0,
+            finalResult: 1,
+            description: "Rolagem de teste.",
+            seed: "cascade-seed",
+            rolledAt: Date.now(),
+          });
         }
       }
     });

@@ -3,7 +3,6 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const ANTILEAK_MODEL = "openai/gpt-4o-mini";
 
 const EMPTY_RESULT = { vazou: false, facts: [] as string[], trechos: [] as string[] };
 
@@ -46,12 +45,14 @@ export const getMessage = internalQuery({
 export const validateAntiLeak = internalAction({
   args: {
     messageId: v.id("messages"),
+    campaignId: v.id("campaigns"),
     hiddenFacts: v.array(v.object({ id: v.string(), content: v.string() })),
   },
   handler: async (ctx, args) => {
-    const messageContent = await ctx.runQuery(internal.prompts.antiLeak.getMessage, {
-      messageId: args.messageId,
-    });
+    const [messageContent, llmConfig] = await Promise.all([
+      ctx.runQuery(internal.prompts.antiLeak.getMessage, { messageId: args.messageId }),
+      ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, { campaignId: args.campaignId }),
+    ]);
 
     const prompt = buildAntiLeakPrompt(messageContent ?? "", args.hiddenFacts);
 
@@ -62,7 +63,7 @@ export const validateAntiLeak = internalAction({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: ANTILEAK_MODEL,
+        model: llmConfig.utilityModel,
         messages: [{ role: "user", content: prompt }],
       }),
     });
