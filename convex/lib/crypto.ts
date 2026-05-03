@@ -14,7 +14,7 @@ function hexToBytes(hex: string): Uint8Array {
 async function getKey(): Promise<CryptoKey> {
   return crypto.subtle.importKey(
     "raw",
-    hexToBytes(ENCRYPTION_KEY_HEX),
+    hexToBytes(ENCRYPTION_KEY_HEX).buffer as ArrayBuffer,
     { name: "AES-GCM" },
     false,
     ["encrypt", "decrypt"],

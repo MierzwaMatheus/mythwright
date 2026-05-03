@@ -1,5 +1,15 @@
 import { ConvexError, v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+
+async function getAuthenticatedUser(ctx: MutationCtx | QueryCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  if (!identity) throw new ConvexError("Not authenticated");
+
+  return await ctx.db
+    .query("users")
+    .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
+    .unique();
+}
 
 export const createCampaign = mutation({
   args: {
@@ -9,13 +19,7 @@ export const createCampaign = mutation({
     expectedDuration: v.union(v.literal("one-shot"), v.literal("medium"), v.literal("long")),
   },
   handler: async (ctx, args) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) throw new ConvexError("Not authenticated");
-
-    const user = await ctx.db
-      .query("users")
-      .withIndex("by_token", (q) => q.eq("tokenIdentifier", identity.tokenIdentifier))
-      .unique();
+    const user = await getAuthenticatedUser(ctx);
     if (!user) throw new ConvexError("User not found");
 
     const now = Date.now();
@@ -30,5 +34,19 @@ export const createCampaign = mutation({
       createdAt: now,
       lastActivityAt: now,
     });
+  },
+});
+
+export const listCampaigns = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) return [];
+
+    return await ctx.db
+      .query("campaigns")
+      .withIndex("by_user_activity", (q) => q.eq("userId", user._id))
+      .order("desc")
+      .collect();
   },
 });

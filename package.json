@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run --config convex/vitest.config.ts",
+    "test:watch": "vitest --config convex/vitest.config.ts"
   },
   "dependencies": {
     "convex": "^1.37.0",
@@ -15,6 +17,9 @@
     "react-dom": "^19.2.5"
   },
   "devDependencies": {
+    "@edge-runtime/vm": "latest",
+    "convex-test": "latest",
+    "vitest": "latest",
     "@eslint/js": "^10.0.1",
     "@types/node": "^24.12.2",
     "@types/react": "^19.2.14",
