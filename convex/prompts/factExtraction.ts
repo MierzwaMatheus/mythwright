@@ -1,3 +1,11 @@
+import { internalAction, internalQuery } from "../_generated/server";
+import { internal } from "../_generated/api";
+import { v } from "convex/values";
+import { Id } from "../_generated/dataModel";
+
+const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+const FACT_EXTRACTION_MODEL = "openai/gpt-4o-mini";
+
 const VALID_VISIBILITIES = new Set(["hidden", "rumored", "known"]);
 
 function normalize(content: string): string {
@@ -107,3 +115,64 @@ Responda APENAS com um JSON no seguinte formato:
 - "visibility": nível de visibilidade do fato ("hidden" = secreto, "rumored" = rumor, "known" = público)
 - "relatedEntityIds": IDs das entidades (personagens, locais, itens) relacionadas ao fato`;
 }
+
+export const getMessageContent = internalQuery({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    const message = await ctx.db.get(args.messageId);
+    return message?.content ?? null;
+  },
+});
+
+export const extractAndPersistFacts = internalAction({
+  args: {
+    messageId: v.id("messages"),
+    campaignId: v.id("campaigns"),
+  },
+  handler: async (ctx, args): Promise<Id<"facts">[]> => {
+    const gmResponse: string | null = await ctx.runQuery(
+      internal.prompts.factExtraction.getMessageContent,
+      { messageId: args.messageId },
+    );
+
+    const existingFacts: Array<{ content: string }> = await ctx.runQuery(
+      internal.facts.getFactsByCampaignInternal,
+      { campaignId: args.campaignId },
+    );
+
+    const prompt = buildFactExtractionPrompt(gmResponse ?? "", existingFacts);
+
+    const response = await fetch(OPENROUTER_URL, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: FACT_EXTRACTION_MODEL,
+        messages: [{ role: "user", content: prompt }],
+      }),
+    });
+
+    const data = await response.json();
+    const rawContent = data.choices[0].message.content;
+
+    const parsedFacts = parseFactExtractionResponse(rawContent);
+    const newFacts = deduplicateFacts(parsedFacts, existingFacts);
+
+    const factIds: Id<"facts">[] = [];
+    for (const fact of newFacts) {
+      const factId: Id<"facts"> = await ctx.runMutation(
+        internal.facts.createFactInternal,
+        {
+          campaignId: args.campaignId,
+          content: fact.content,
+          visibility: fact.visibility,
+        },
+      );
+      factIds.push(factId);
+    }
+
+    return factIds;
+  },
+});

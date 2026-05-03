@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query, internalMutation, internalQuery, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 
@@ -71,6 +71,33 @@ export const changeFactVisibility = mutation({
     }
 
     await ctx.db.patch(args.factId, { visibility: args.visibility });
+  },
+});
+
+export const createFactInternal = internalMutation({
+  args: {
+    campaignId: v.id("campaigns"),
+    content: v.string(),
+    visibility: v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known")),
+    relatedEntityIds: v.optional(v.array(v.id("entities"))),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("facts", {
+      campaignId: args.campaignId,
+      content: args.content,
+      visibility: args.visibility,
+      relatedEntityIds: args.relatedEntityIds,
+    });
+  },
+});
+
+export const getFactsByCampaignInternal = internalQuery({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("facts")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .take(100);
   },
 });
 
