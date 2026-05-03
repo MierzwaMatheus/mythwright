@@ -77,12 +77,12 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/03-prompt-library.md` §5 (Scene Summarizer) e §6 (Arc Summarizer) e `@docs/01-gap-report.md` G-013
 
-- [ ] Criar `convex/prompts/sceneSummarizer.ts` com template e parser conforme Prompt Library §5
-- [ ] Implementar `summarizeScene(sceneId)` em `convex/scenes.ts` (hoje stub na linha 53): lê mensagens, chama LLM utilitário, persiste em `summaries` com `level: "scene"`, gera embedding
-- [ ] Criar `convex/prompts/arcSummarizer.ts` conforme Prompt Library §6
-- [ ] Implementar `internalAction summarizeArc(campaignId)` que agrega sumários de cena em sumário de arco
-- [ ] Testar que `summarizeScene` persiste corretamente em `summaries` com todos os campos
-- [ ] Testar que `summarizeArc` agrega múltiplos sumários de cena
+- [x] Criar `convex/prompts/sceneSummarizer.ts` com template e parser conforme Prompt Library §5
+- [x] Implementar `summarizeScene(sceneId)` em `convex/scenes.ts` (hoje stub na linha 53): lê mensagens, chama LLM utilitário, persiste em `summaries` com `level: "scene"`, gera embedding
+- [x] Criar `convex/prompts/arcSummarizer.ts` conforme Prompt Library §6
+- [x] Implementar `internalAction summarizeArc(campaignId)` que agrega sumários de cena em sumário de arco
+- [x] Testar que `summarizeScene` persiste corretamente em `summaries` com todos os campos
+- [x] Testar que `summarizeArc` agrega múltiplos sumários de cena
 
 ---
 
@@ -92,8 +92,8 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/03-prompt-library.md` §1 (GM System Prompt) e `@docs/01-gap-report.md` G-011
 
-- [ ] Criar `convex/prompts/gmSystemPrompt.ts` com `buildGmSystemPrompt(campaign)` injetando `tone`, `premise`, regras FATE compactas e instrução de tools
-- [ ] Testar que o prompt gerado inclui os campos da campanha e a versão do prompt
+- [x] Criar `convex/prompts/gmSystemPrompt.ts` com `buildGmSystemPrompt(campaign)` injetando `tone`, `premise`, regras FATE compactas e instrução de tools
+- [x] Testar que o prompt gerado inclui os campos da campanha e a versão do prompt
 
 ### Streaming — G-002
 
