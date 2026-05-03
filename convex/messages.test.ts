@@ -94,3 +94,51 @@ describe("messages.createMessage", () => {
     });
   });
 });
+
+describe("messages.appendMessageTokens", () => {
+  it("múltiplas chamadas acumulam o conteúdo corretamente", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupCampaign(t);
+
+    const messageId = await identity.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm" as const,
+      content: "Hello",
+      clientMessageId: "client-stream-001",
+    });
+
+    await identity.mutation(api.messages.appendMessageTokens, {
+      messageId: messageId as Id<"messages">,
+      tokens: " World",
+    });
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as Id<"messages">);
+      expect(msg!.content).toBe("Hello World");
+    });
+  });
+
+  it("lança erro ao tentar appendar em messageId inexistente", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupCampaign(t);
+
+    // Cria e deleta uma mensagem para obter um ID válido em formato mas inexistente no banco
+    const messageId = await identity.mutation(api.messages.createMessage, {
+      campaignId,
+      role: "gm" as const,
+      content: "Temporária",
+      clientMessageId: "client-temp-999",
+    });
+
+    await t.run(async (ctx) => {
+      await ctx.db.delete(messageId as Id<"messages">);
+    });
+
+    await expect(
+      identity.mutation(api.messages.appendMessageTokens, {
+        messageId: messageId as Id<"messages">,
+        tokens: " tokens",
+      }),
+    ).rejects.toThrow();
+  });
+});
