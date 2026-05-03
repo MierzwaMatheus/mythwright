@@ -28,7 +28,7 @@ export const createTrigger = mutation({
     const user = await getAuthenticatedUser(ctx);
     if (!user) throw new ConvexError("Not authenticated");
     await assertCampaignOwnership(ctx, args.campaignId, user._id);
-    return await ctx.db.insert("triggers", {
+    const triggerId = await ctx.db.insert("triggers", {
       campaignId: args.campaignId,
       description: args.description,
       scope: args.scope,
@@ -37,6 +37,8 @@ export const createTrigger = mutation({
       oneShot: args.oneShot ?? false,
       scopeRefId: args.scopeRefId,
     });
+    await ctx.scheduler.runAfter(0, internal.lib.embedding.embedTrigger, { triggerId });
+    return triggerId;
   },
 });
 
@@ -54,6 +56,16 @@ export const updateTriggerStatus = mutation({
 
     await assertCampaignOwnership(ctx, trigger.campaignId, user._id);
     await ctx.db.patch(args.triggerId, { status: args.status });
+  },
+});
+
+export const setTriggerEmbedding = internalMutation({
+  args: {
+    triggerId: v.id("triggers"),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.triggerId, { embedding: args.embedding });
   },
 });
 

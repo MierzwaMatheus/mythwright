@@ -1,7 +1,8 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query, internalMutation, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
+import { internal } from "./_generated/api";
 
 async function assertCampaignOwnership(
   ctx: MutationCtx,
@@ -72,6 +73,16 @@ export const changeEntityVisibility = mutation({
   },
 });
 
+export const setEntityEmbedding = internalMutation({
+  args: {
+    entityId: v.id("entities"),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.entityId, { embedding: args.embedding });
+  },
+});
+
 export const createEntity = mutation({
   args: {
     campaignId: v.id("campaigns"),
@@ -92,12 +103,14 @@ export const createEntity = mutation({
 
     await assertCampaignOwnership(ctx, args.campaignId, user._id);
 
-    return await ctx.db.insert("entities", {
+    const entityId = await ctx.db.insert("entities", {
       campaignId: args.campaignId,
       type: args.type,
       name: args.name,
       visibility: args.visibility,
       description: args.description,
     });
+    await ctx.scheduler.runAfter(0, internal.lib.embedding.embedEntity, { entityId });
+    return entityId;
   },
 });
