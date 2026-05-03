@@ -148,19 +148,19 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/03-prompt-library.md` §7 (World Generator) e `@docs/01-gap-report.md` G-010
 
-- [ ] Criar `convex/prompts/worldGeneration.ts` com template e parser conforme Prompt Library §7
-- [ ] Criar `convex/actions/generateWorld.ts` com `internalAction generateWorld(campaignId)`: chama LLM narrativo, parseia JSON, persiste entidades, fatos, gatilhos e cena inicial
-- [ ] Adicionar campo `status` em `campaigns` para sub-fases de setup (`"draft" | "generating" | "ready"`)
-- [ ] Testar geração de mundo com mock de LLM — verificar que entidades, fatos e gatilhos são persistidos corretamente
-- [ ] Testar que falha no LLM não deixa campanha em estado inconsistente
+- [x] Criar `convex/prompts/worldGeneration.ts` com template e parser conforme Prompt Library §7
+- [x] Criar `convex/generateWorld.ts` com `internalAction generateWorld(campaignId)`: chama LLM narrativo, parseia JSON, persiste entidades, fatos, gatilhos e cena inicial
+- [x] Adicionar campo `setupStatus` em `campaigns` para sub-fases de setup (`"draft" | "generating" | "ready"`)
+- [x] Testar geração de mundo com mock de LLM — verificar que entidades, fatos e gatilhos são persistidos corretamente
+- [x] Testar que falha no LLM não deixa campanha em estado inconsistente
 
 ### Geração Assistida de Personagem — G-012
 
 > Contexto: `@docs/03-prompt-library.md` §8 (Character Generator) e `@docs/01-gap-report.md` G-012
 
-- [ ] Criar `convex/prompts/characterGeneration.ts` com template e parser conforme Prompt Library §8
-- [ ] Criar `convex/actions/generateCharacter.ts` com `internalAction generateCharacter(campaignId, premise)`: gera ficha FATE completa a partir de texto livre
-- [ ] Testar geração de personagem com mock de LLM — verificar campos obrigatórios da ficha FATE (aspects, skills, stress tracks)
+- [x] Criar `convex/prompts/characterGeneration.ts` com template e parser conforme Prompt Library §8
+- [x] Criar `convex/generateCharacter.ts` com `internalAction generateCharacter(campaignId, premise)`: gera ficha FATE completa a partir de texto livre
+- [x] Testar geração de personagem com mock de LLM — verificar campos obrigatórios da ficha FATE (aspects, skills, stress tracks)
 
 ---
 
