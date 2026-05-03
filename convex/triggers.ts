@@ -19,8 +19,10 @@ export const createTrigger = mutation({
   args: {
     campaignId: v.id("campaigns"),
     description: v.string(),
-    scope: v.string(),
+    scope: v.union(v.literal("global"), v.literal("scene"), v.literal("location")),
     effects: v.array(v.object({ type: v.string(), payload: v.any() })),
+    oneShot: v.optional(v.boolean()),
+    scopeRefId: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -32,6 +34,8 @@ export const createTrigger = mutation({
       scope: args.scope,
       effects: args.effects,
       status: "armed",
+      oneShot: args.oneShot ?? false,
+      scopeRefId: args.scopeRefId,
     });
   },
 });
@@ -106,7 +110,9 @@ export const getArmedTriggersByScope = query({
     return triggers.filter(
       (t) =>
         t.status === "armed" &&
-        (t.scope === "global" || t.scope === args.sceneId),
+        (t.scope === "global" ||
+          (args.sceneId !== undefined && t.scope === "scene" && t.scopeRefId === args.sceneId) ||
+          (args.sceneId !== undefined && t.scopeRefId === args.sceneId)),
     );
   },
 });

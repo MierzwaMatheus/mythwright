@@ -17,7 +17,7 @@ async function assertCampaignOwnership(
 export const listEntities = query({
   args: {
     campaignId: v.id("campaigns"),
-    visibility: v.optional(v.union(v.literal("hidden"), v.literal("known"))),
+    visibility: v.optional(v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known"))),
     type: v.optional(v.union(
       v.literal("npc"),
       v.literal("location"),
@@ -58,7 +58,7 @@ export const listEntities = query({
 export const changeEntityVisibility = mutation({
   args: {
     entityId: v.id("entities"),
-    visibility: v.union(v.literal("hidden"), v.literal("known")),
+    visibility: v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known")),
   },
   handler: async (ctx, args) => {
     const user = await getAuthenticatedUser(ctx);
@@ -83,7 +83,7 @@ export const createEntity = mutation({
       v.literal("concept"),
     ),
     name: v.string(),
-    visibility: v.union(v.literal("hidden"), v.literal("known")),
+    visibility: v.union(v.literal("hidden"), v.literal("rumored"), v.literal("known")),
     description: v.string(),
   },
   handler: async (ctx, args) => {

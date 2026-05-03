@@ -50,7 +50,28 @@ async function setupFullScene(t: ReturnType<typeof convexTest>) {
   }) as Id<"sceneAspects">;
 
   const targetRollId = await t.run(async (ctx) => {
-    return await ctx.db.insert("diceRolls", { campaignId });
+    const msgId = await ctx.db.insert("messages", {
+      campaignId,
+      role: "player",
+      content: "Ação.",
+      clientMessageId: "client-roll-setup",
+      status: "complete",
+    });
+    return await ctx.db.insert("diceRolls", {
+      campaignId,
+      messageId: msgId,
+      type: "attack",
+      skillName: "Fight",
+      skillLevel: 2,
+      invokedAspectIds: [],
+      bonus: 0,
+      diceResults: [0, 1, -1, 0],
+      diceTotal: 0,
+      finalResult: 2,
+      description: "Rolagem de teste.",
+      seed: "test-seed",
+      rolledAt: Date.now(),
+    });
   }) as Id<"diceRolls">;
 
   return { identity, campaignId, characterId, sceneId, aspectId, targetRollId };
