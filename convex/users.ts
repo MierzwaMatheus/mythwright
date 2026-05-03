@@ -87,10 +87,3 @@ export const getMyOpenRouterKey = query({
   },
 });
 
-export const list = query({
-  args: {},
-  handler: async (ctx) => {
-    const users = await ctx.db.query("users").take(100);
-    return users.map(({ encryptedOpenRouterKey: _omit, ...rest }) => rest);
-  },
-});
