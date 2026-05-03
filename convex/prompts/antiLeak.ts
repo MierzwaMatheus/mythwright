@@ -1,0 +1,27 @@
+function formatHiddenFacts(
+  hiddenFacts: Array<{ id: string; content: string }>
+): string {
+  return hiddenFacts.map((f) => `[${f.id}] ${f.content}`).join("\n");
+}
+
+export function buildAntiLeakPrompt(
+  gmResponse: string,
+  hiddenFacts: Array<{ id: string; content: string }>
+): string {
+  const factsBlock = formatHiddenFacts(hiddenFacts);
+
+  return `Você é um verificador de segurança narrativa. Analise a resposta do GM abaixo e verifique se algum fato secreto foi revelado.
+
+RESPOSTA DO GM:
+${gmResponse}
+
+FATOS SECRETOS (não devem ser revelados):
+${factsBlock}
+
+Responda APENAS com um JSON no seguinte formato:
+{ "vazou": bool, "facts": string[], "trechos": string[] }
+
+- "vazou": true se algum fato secreto foi revelado, false caso contrário
+- "facts": array com os IDs dos fatos que vazaram (ex: ["fact_001"])
+- "trechos": array com os trechos exatos da resposta do GM que revelaram os fatos`;
+}
