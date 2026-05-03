@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, it, expect } from "vitest";
 import { api } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
+// changeFactVisibility tests are appended at the end of this file
 import schema from "./schema";
 import { ConvexError } from "convex/values";
 
@@ -124,6 +125,107 @@ describe("facts.createFact", () => {
         campaignId,
         content: "Fato de outro usuário.",
         visibility: "known",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+});
+
+describe("facts.changeFactVisibility", () => {
+  async function createFact(
+    identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
+    campaignId: Id<"campaigns">,
+    visibility: "hidden" | "rumored" | "known",
+  ) {
+    return identity.mutation(api.facts.createFact, {
+      campaignId,
+      content: "Conteúdo do fato.",
+      visibility,
+    });
+  }
+
+  it("hidden → rumored é válido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv001", "cfv001@test.com");
+    const factId = await createFact(identity, campaignId, "hidden");
+
+    await identity.mutation(api.facts.changeFactVisibility, {
+      factId: factId as Id<"facts">,
+      visibility: "rumored",
+    });
+
+    await t.run(async (ctx) => {
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("rumored");
+    });
+  });
+
+  it("hidden → known é válido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv002", "cfv002@test.com");
+    const factId = await createFact(identity, campaignId, "hidden");
+
+    await identity.mutation(api.facts.changeFactVisibility, {
+      factId: factId as Id<"facts">,
+      visibility: "known",
+    });
+
+    await t.run(async (ctx) => {
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("known");
+    });
+  });
+
+  it("rumored → known é válido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv003", "cfv003@test.com");
+    const factId = await createFact(identity, campaignId, "rumored");
+
+    await identity.mutation(api.facts.changeFactVisibility, {
+      factId: factId as Id<"facts">,
+      visibility: "known",
+    });
+
+    await t.run(async (ctx) => {
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("known");
+    });
+  });
+
+  it("known → hidden é inválido — lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv004", "cfv004@test.com");
+    const factId = await createFact(identity, campaignId, "known");
+
+    await expect(
+      identity.mutation(api.facts.changeFactVisibility, {
+        factId: factId as Id<"facts">,
+        visibility: "hidden",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("known → rumored é inválido — lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv005", "cfv005@test.com");
+    const factId = await createFact(identity, campaignId, "known");
+
+    await expect(
+      identity.mutation(api.facts.changeFactVisibility, {
+        factId: factId as Id<"facts">,
+        visibility: "rumored",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+
+  it("rumored → hidden é inválido — lança ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|cfv006", "cfv006@test.com");
+    const factId = await createFact(identity, campaignId, "rumored");
+
+    await expect(
+      identity.mutation(api.facts.changeFactVisibility, {
+        factId: factId as Id<"facts">,
+        visibility: "hidden",
       }),
     ).rejects.toThrow(ConvexError);
   });
