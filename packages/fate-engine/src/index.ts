@@ -54,6 +54,26 @@ export function rollFateDice(seed: string, skillLevel: number): FateDiceResult {
   return { dice, total };
 }
 
+export type StressTrack = {
+  boxes: Array<{ value: number; marked: boolean }>;
+};
+
+export type StressResult =
+  | { canAbsorb: true; boxToMark: number; requiresConsequence: false }
+  | { canAbsorb: false; requiresConsequence: true; overflow: number };
+
+export function calculateStress(amount: number, track: StressTrack): StressResult {
+  const available = track.boxes
+    .filter((box) => !box.marked && box.value >= amount)
+    .sort((a, b) => a.value - b.value);
+
+  if (available.length > 0) {
+    return { canAbsorb: true, boxToMark: available[0].value, requiresConsequence: false };
+  }
+
+  return { canAbsorb: false, requiresConsequence: true, overflow: amount };
+}
+
 export function applyAspectInvocation(
   roll: FateDiceResult,
   effect: "bonus_2" | "reroll",

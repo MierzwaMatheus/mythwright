@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { rollFateDice, calculateOutcome, applyAspectInvocation } from "./index.js";
-import type { FateDie } from "./index.js";
+import { rollFateDice, calculateOutcome, applyAspectInvocation, calculateStress } from "./index.js";
+import type { FateDie, StressTrack } from "./index.js";
 
 describe("rollFateDice", () => {
   // Caso 1: Determinismo
@@ -146,5 +146,99 @@ describe("applyAspectInvocation", () => {
     expect(() => applyAspectInvocation(roll, "reroll")).toThrow(
       "seed is required for reroll"
     );
+  });
+});
+
+describe("calculateStress", () => {
+  const defaultTrack: StressTrack = {
+    boxes: [
+      { value: 1, marked: false },
+      { value: 2, marked: false },
+      { value: 3, marked: false },
+    ],
+  };
+
+  // Caso 1: amount=1, todas livres -> boxToMark: 1
+  it("absorbs amount=1 into box 1 when all boxes are free", () => {
+    const result = calculateStress(1, defaultTrack);
+    expect(result).toEqual({ canAbsorb: true, boxToMark: 1, requiresConsequence: false });
+  });
+
+  // Caso 2: amount=2, todas livres -> boxToMark: 2
+  it("absorbs amount=2 into box 2 when all boxes are free", () => {
+    const result = calculateStress(2, defaultTrack);
+    expect(result).toEqual({ canAbsorb: true, boxToMark: 2, requiresConsequence: false });
+  });
+
+  // Caso 3: amount=1, caixa 1 marcada -> boxToMark: 2 (menor disponivel)
+  it("absorbs amount=1 into box 2 when box 1 is already marked", () => {
+    const track: StressTrack = {
+      boxes: [
+        { value: 1, marked: true },
+        { value: 2, marked: false },
+        { value: 3, marked: false },
+      ],
+    };
+    const result = calculateStress(1, track);
+    expect(result).toEqual({ canAbsorb: true, boxToMark: 2, requiresConsequence: false });
+  });
+
+  // Caso 4: amount=2, caixa 2 marcada, caixa 3 livre -> boxToMark: 3
+  it("absorbs amount=2 into box 3 when box 2 is marked and box 3 is free", () => {
+    const track: StressTrack = {
+      boxes: [
+        { value: 1, marked: false },
+        { value: 2, marked: true },
+        { value: 3, marked: false },
+      ],
+    };
+    const result = calculateStress(2, track);
+    expect(result).toEqual({ canAbsorb: true, boxToMark: 3, requiresConsequence: false });
+  });
+
+  // Caso 5: amount=4, track padrao -> requiresConsequence: true, overflow: 4
+  it("cannot absorb amount=4 in default track, returns requiresConsequence and overflow", () => {
+    const result = calculateStress(4, defaultTrack);
+    expect(result).toEqual({ canAbsorb: false, requiresConsequence: true, overflow: 4 });
+  });
+
+  // Caso 6: todas marcadas, amount=1 -> requiresConsequence: true
+  it("cannot absorb when all boxes are marked", () => {
+    const track: StressTrack = {
+      boxes: [
+        { value: 1, marked: true },
+        { value: 2, marked: true },
+        { value: 3, marked: true },
+      ],
+    };
+    const result = calculateStress(1, track);
+    expect(result).toEqual({ canAbsorb: false, requiresConsequence: true, overflow: 1 });
+  });
+
+  // Caso 7: amount=3, caixa 3 marcada, caixas 1 e 2 livres -> requiresConsequence: true
+  it("cannot absorb amount=3 when box 3 is marked and only smaller boxes are free", () => {
+    const track: StressTrack = {
+      boxes: [
+        { value: 1, marked: false },
+        { value: 2, marked: false },
+        { value: 3, marked: true },
+      ],
+    };
+    const result = calculateStress(3, track);
+    expect(result).toEqual({ canAbsorb: false, requiresConsequence: true, overflow: 3 });
+  });
+
+  // Caso 8: track [1,2,3,4], amount=3 -> boxToMark: 3 (nao 4)
+  it("absorbs amount=3 into box 3 (smallest fit), not box 4", () => {
+    const track: StressTrack = {
+      boxes: [
+        { value: 1, marked: false },
+        { value: 2, marked: false },
+        { value: 3, marked: false },
+        { value: 4, marked: false },
+      ],
+    };
+    const result = calculateStress(3, track);
+    expect(result).toEqual({ canAbsorb: true, boxToMark: 3, requiresConsequence: false });
   });
 });
