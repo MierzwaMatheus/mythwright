@@ -127,4 +127,15 @@ export default defineSchema({
     usesFreeInvoke: v.boolean(),
     invokedAt: v.number(),
   }).index("by_aspect", ["aspectId"]),
+
+  compels: defineTable({
+    campaignId: v.id("campaigns"),
+    aspectId: v.id("sceneAspects"),
+    characterId: v.id("characters"),
+    complication: v.string(),
+    status: v.union(v.literal("pending"), v.literal("accepted"), v.literal("refused")),
+    createdAt: v.number(),
+    resolvedAt: v.optional(v.number()),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_character", ["characterId"]),
 });

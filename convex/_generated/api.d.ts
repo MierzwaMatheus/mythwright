@@ -11,6 +11,7 @@
 import type * as aspectInvocations from "../aspectInvocations.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characters from "../characters.js";
+import type * as compels from "../compels.js";
 import type * as consequences from "../consequences.js";
 import type * as entities from "../entities.js";
 import type * as facts from "../facts.js";
@@ -32,6 +33,7 @@ declare const fullApi: ApiFromModules<{
   aspectInvocations: typeof aspectInvocations;
   campaigns: typeof campaigns;
   characters: typeof characters;
+  compels: typeof compels;
   consequences: typeof consequences;
   entities: typeof entities;
   facts: typeof facts;
