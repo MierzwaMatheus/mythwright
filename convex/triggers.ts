@@ -83,6 +83,47 @@ export const markTriggerFired = internalMutation({
   },
 });
 
+export const fireTrigger = internalMutation({
+  args: {
+    triggerId: v.id("triggers"),
+    firedByMessageId: v.id("messages"),
+  },
+  handler: async (ctx, args): Promise<{ revealedFactIds: Id<"facts">[] }> => {
+    const trigger = await ctx.db.get(args.triggerId);
+    if (!trigger) return { revealedFactIds: [] };
+    if (trigger.status === "fired") return { revealedFactIds: [] };
+
+    const revealedFactIds: Id<"facts">[] = [];
+
+    for (const effect of trigger.effects) {
+      if (effect.type === "change_fact_visibility") {
+        const payload = effect.payload as { factId: Id<"facts">; visibility: string };
+        if (payload.factId && payload.visibility) {
+          await ctx.db.patch(payload.factId, { visibility: payload.visibility as "hidden" | "rumored" | "known" });
+          if (payload.visibility === "known" || payload.visibility === "rumored") {
+            revealedFactIds.push(payload.factId);
+          }
+        }
+      } else if (effect.type === "change_entity_visibility") {
+        const payload = effect.payload as { entityId: Id<"entities">; visibility: string };
+        if (payload.entityId && payload.visibility) {
+          await ctx.db.patch(payload.entityId, { visibility: payload.visibility as "hidden" | "rumored" | "known" });
+        }
+      }
+    }
+
+    if (trigger.oneShot) {
+      await ctx.db.patch(args.triggerId, {
+        status: "fired",
+        firedAt: Date.now(),
+        firedByMessageId: args.firedByMessageId,
+      });
+    }
+
+    return { revealedFactIds };
+  },
+});
+
 export const resolveTriggerEffects = action({
   args: { triggeredIds: v.array(v.id("triggers")) },
   handler: async (ctx, args) => {

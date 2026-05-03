@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
 import { describe, it, expect } from "vitest";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { ConvexError } from "convex/values";
@@ -97,6 +97,31 @@ async function setupUserCampaignAndScene(
   };
 }
 
+describe("compels.getById", () => {
+  it("retorna compel existente quando ID valido fornecido", async () => {
+    const t = convexTest(schema, modules);
+    const { compelId } = await setupCompel(t, "token|gb001", "gb001@test.com");
+
+    const compel = await t.query(internal.compels.getById, { compelId });
+
+    expect(compel).not.toBeNull();
+    expect(compel!._id).toBe(compelId);
+    expect(compel!.status).toBe("pending");
+  });
+
+  it("retorna null para ID inexistente", async () => {
+    const t = convexTest(schema, modules);
+    const { compelId } = await setupCompel(t, "token|gb002", "gb002@test.com");
+
+    // Deletar o compel para tornar o ID inexistente
+    await t.run(async (ctx) => { await ctx.db.delete(compelId); });
+
+    const result = await t.query(internal.compels.getById, { compelId });
+
+    expect(result).toBeNull();
+  });
+});
+
 describe("compels.resolveCompel", () => {
   it("accept — fatePoints incrementa e compel fica accepted", async () => {
     const t = convexTest(schema, modules);
@@ -168,6 +193,69 @@ describe("compels.resolveCompel", () => {
         decision: "accept",
       }),
     ).rejects.toThrow(ConvexError);
+  });
+});
+
+describe("compels.beginCompelInternal campos opcionais", () => {
+  it("cria compel com triggeringMessageId e pausedGmMessageId quando ambos fornecidos", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, sceneId, aspectId, characterId } = await setupCompel(t, "token|bi001", "bi001@test.com");
+
+    // Criar duas mensagens para usar como IDs
+    let triggeringId: Id<"messages">;
+    let pausedId: Id<"messages">;
+    await t.run(async (ctx) => {
+      triggeringId = await ctx.db.insert("messages", {
+        campaignId,
+        sceneId,
+        role: "player",
+        content: "Mensagem do jogador",
+        clientMessageId: "client-bi001-a",
+        status: "complete",
+      });
+      pausedId = await ctx.db.insert("messages", {
+        campaignId,
+        sceneId,
+        role: "gm",
+        content: "Mensagem do gm pausada",
+        clientMessageId: "client-bi001-b",
+        status: "pending",
+      });
+    });
+
+    const compelId = await t.mutation(internal.compels.beginCompelInternal, {
+      campaignId,
+      aspectId,
+      characterId,
+      complication: "Complicação com IDs",
+      triggeringMessageId: triggeringId!,
+      pausedGmMessageId: pausedId!,
+    });
+
+    await t.run(async (ctx) => {
+      const compel = await ctx.db.get(compelId as Id<"compels">);
+      expect(compel!.triggeringMessageId).toBe(triggeringId!);
+      expect(compel!.pausedGmMessageId).toBe(pausedId!);
+    });
+  });
+
+  it("cria compel sem campos opcionais — comportamento existente nao quebra", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, aspectId, characterId } = await setupCompel(t, "token|bi002", "bi002@test.com");
+
+    const compelId = await t.mutation(internal.compels.beginCompelInternal, {
+      campaignId,
+      aspectId,
+      characterId,
+      complication: "Complicacao sem IDs",
+    });
+
+    await t.run(async (ctx) => {
+      const compel = await ctx.db.get(compelId as Id<"compels">);
+      expect(compel).not.toBeNull();
+      expect(compel!.triggeringMessageId).toBeUndefined();
+      expect(compel!.pausedGmMessageId).toBeUndefined();
+    });
   });
 });
 

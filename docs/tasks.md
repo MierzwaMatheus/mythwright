@@ -77,12 +77,12 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/03-prompt-library.md` §5 (Scene Summarizer) e §6 (Arc Summarizer) e `@docs/01-gap-report.md` G-013
 
-- [ ] Criar `convex/prompts/sceneSummarizer.ts` com template e parser conforme Prompt Library §5
-- [ ] Implementar `summarizeScene(sceneId)` em `convex/scenes.ts` (hoje stub na linha 53): lê mensagens, chama LLM utilitário, persiste em `summaries` com `level: "scene"`, gera embedding
-- [ ] Criar `convex/prompts/arcSummarizer.ts` conforme Prompt Library §6
-- [ ] Implementar `internalAction summarizeArc(campaignId)` que agrega sumários de cena em sumário de arco
-- [ ] Testar que `summarizeScene` persiste corretamente em `summaries` com todos os campos
-- [ ] Testar que `summarizeArc` agrega múltiplos sumários de cena
+- [x] Criar `convex/prompts/sceneSummarizer.ts` com template e parser conforme Prompt Library §5
+- [x] Implementar `summarizeScene(sceneId)` em `convex/scenes.ts` (hoje stub na linha 53): lê mensagens, chama LLM utilitário, persiste em `summaries` com `level: "scene"`, gera embedding
+- [x] Criar `convex/prompts/arcSummarizer.ts` conforme Prompt Library §6
+- [x] Implementar `internalAction summarizeArc(campaignId)` que agrega sumários de cena em sumário de arco
+- [x] Testar que `summarizeScene` persiste corretamente em `summaries` com todos os campos
+- [x] Testar que `summarizeArc` agrega múltiplos sumários de cena
 
 ---
 
@@ -92,53 +92,53 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/03-prompt-library.md` §1 (GM System Prompt) e `@docs/01-gap-report.md` G-011
 
-- [ ] Criar `convex/prompts/gmSystemPrompt.ts` com `buildGmSystemPrompt(campaign)` injetando `tone`, `premise`, regras FATE compactas e instrução de tools
-- [ ] Testar que o prompt gerado inclui os campos da campanha e a versão do prompt
+- [x] Criar `convex/prompts/gmSystemPrompt.ts` com `buildGmSystemPrompt(campaign)` injetando `tone`, `premise`, regras FATE compactas e instrução de tools
+- [x] Testar que o prompt gerado inclui os campos da campanha e a versão do prompt
 
 ### Streaming — G-002
 
 > Contexto: `@docs/02-technical-architecture.md` §3.4 (Estágio 4 — geração com streaming) e `@docs/01-gap-report.md` G-002
 
-- [ ] Implementar fetch com `stream: true` e leitura de SSE em `convex/processTurn.ts`
-- [ ] Persistir tokens incrementalmente via `messages.appendMessageTokens` (já existe em `convex/messages.ts`) a cada batch de N tokens ou N ms
-- [ ] Testar streaming com mock de SSE — verificar que tokens chegam na order correta em `messages`
+- [x] Implementar fetch com `stream: true` e leitura de SSE em `convex/processTurn.ts`
+- [x] Persistir tokens incrementalmente via `messages.appendMessageTokens` (já existe em `convex/messages.ts`) a cada batch de N tokens ou N ms
+- [x] Testar streaming com mock de SSE — verificar que tokens chegam na order correta em `messages`
 
 ### Tool Calling Real — G-003
 
 > Contexto: `@docs/02-technical-architecture.md` §8 (catálogo de tools FATE) e `@docs/01-gap-report.md` G-003
 
-- [ ] Criar `convex/tools/registry.ts` mapeando cada tool FATE para a mutation/action correspondente
-- [ ] Definir JSON Schema (OpenRouter format) para cada tool: `roll_fate_dice`, `invoke_aspect`, `compel_aspect`, `apply_stress`, `apply_consequence`, `award_fate_point`, `spend_fate_point`, `add_scene_aspect`, `change_scene`, `reveal_fact`, `reveal_entity`
-- [ ] Implementar loop de tool calling em `processTurn`: stream → detectar `tool_call` → executar via registry → append result → continuar stream
-- [ ] Criar wrapper `roll_fate_dice` que chama `rollFateDice` do fate-engine e persiste resultado em `diceRolls`
-- [ ] Testar loop completo de tool calling com mock de stream contendo tool_calls
-- [ ] Testar cada tool individualmente via registry
+- [x] Criar `convex/tools/registry.ts` mapeando cada tool FATE para a mutation/action correspondente
+- [x] Definir JSON Schema (OpenRouter format) para cada tool: `roll_fate_dice`, `invoke_aspect`, `compel_aspect`, `apply_stress`, `apply_consequence`, `award_fate_point`, `spend_fate_point`, `add_scene_aspect`, `change_scene`, `reveal_fact`, `reveal_entity`
+- [x] Implementar loop de tool calling em `processTurn`: stream → detectar `tool_call` → executar via registry → append result → continuar stream
+- [x] Criar wrapper `roll_fate_dice` que chama `rollFateDice` do fate-engine e persiste resultado em `diceRolls`
+- [x] Testar loop completo de tool calling com mock de stream contendo tool_calls
+- [x] Testar cada tool individualmente via registry
 
 ### processTurn — 8 Estágios Completos — G-001
 
 > Contexto: `@docs/02-technical-architecture.md` §3 (pseudocódigo completo dos 8 estágios) e `@docs/01-gap-report.md` G-001, G-017, G-018, G-024, G-025
 
-- [ ] **Estágio 1:** garantir persistência da mensagem do jogador com contrato claro (idempotência por `clientMessageId`)
-- [ ] **Idempotência:** guard no início verificando se já existe mensagem GM com `causedByMessageId == playerMessageId` — se sim, retornar sem reprocessar (G-018)
-- [ ] **Estágio 2:** integrar `buildFullContext` de `convex/lib/contextBuilder.ts` com dados reais (entidades, cena, histórico de mensagens, sumários); gerar embedding da mensagem do jogador
-- [ ] **Estágio 3:** integrar `classifyTriggers` + `resolveTriggerEffects` (pré-filtro determinístico → vectorSearch top-K → classify → executar)
-- [ ] **Estágio 4:** substituir chamada única por loop de streaming + tool calling (usa G-002 e G-003)
-- [ ] **Estágio 5:** buscar hidden facts relevantes via vectorSearch antes de passar para `validateAntiLeak` (em vez de receber lista arbitrária do caller) (G-024)
-- [ ] **Estágio 6:** confirmar que `extractAndPersistFacts` roda em paralelo com estágio 5 (já implementado, revisar se é paralelo)
-- [ ] **Estágio 7:** housekeeping — persistir `triggersFired` e `factsRevealed` na mensagem GM; persistir `tokensUsed` da resposta
-- [ ] **Estágio 8:** ao detectar mudança de cena, agendar `summarizeScene` da cena encerrada
-- [ ] Usar `buildGmSystemPrompt` (G-011) no contexto enviado ao LLM
-- [ ] Suite de testes completa dos 8 estágios com mocks de LLM e embedding (G-025)
-- [ ] Testar idempotência: action re-agendada não gera resposta duplicada
-- [ ] Testar regeneração por vazamento: anti-leak falha → regenera com memória do turno
+- [x] **Estágio 1:** garantir persistência da mensagem do jogador com contrato claro (idempotência por `clientMessageId`)
+- [x] **Idempotência:** guard no início verificando se já existe mensagem GM com `causedByMessageId == playerMessageId` — se sim, retornar sem reprocessar (G-018)
+- [x] **Estágio 2:** integrar `buildFullContext` de `convex/lib/contextBuilder.ts` com dados reais (entidades, cena, histórico de mensagens, sumários); gerar embedding da mensagem do jogador
+- [x] **Estágio 3:** integrar `classifyTriggers` + `resolveTriggerEffects` (pré-filtro determinístico → vectorSearch top-K → classify → executar)
+- [x] **Estágio 4:** substituir chamada única por loop de streaming + tool calling (usa G-002 e G-003)
+- [x] **Estágio 5:** buscar hidden facts relevantes via vectorSearch antes de passar para `validateAntiLeak` (em vez de receber lista arbitrária do caller) (G-024)
+- [x] **Estágio 6:** confirmar que `extractAndPersistFacts` roda em paralelo com estágio 5 (já implementado, revisar se é paralelo)
+- [x] **Estágio 7:** housekeeping — persistir `triggersFired` e `factsRevealed` na mensagem GM; persistir `tokensUsed` da resposta
+- [x] **Estágio 8:** ao detectar mudança de cena, agendar `summarizeScene` da cena encerrada
+- [x] Usar `buildGmSystemPrompt` (G-011) no contexto enviado ao LLM
+- [x] Suite de testes completa dos 8 estágios com mocks de LLM e embedding (G-025)
+- [x] Testar idempotência: action re-agendada não gera resposta duplicada
+- [x] Testar regeneração por vazamento: anti-leak falha → regenera com memória do turno
 
 ### Continuação Pós-Compel — G-014
 
 > Contexto: `@docs/02-technical-architecture.md` §6.5 (orquestração de compel) e `@docs/01-gap-report.md` G-014
 
-- [ ] Implementar `internalAction continueAfterCompel(playerMessageId)` que monta contexto com resultado do compel e retoma geração
-- [ ] Modificar `compels.resolveCompel` para agendar `continueAfterCompel` após persistir a resolução
-- [ ] Testar fluxo completo: compel detectado → `awaiting_player_decision` → jogador resolve → continuação gera resto da resposta
+- [x] Implementar `internalAction continueAfterCompel(playerMessageId)` que monta contexto com resultado do compel e retoma geração
+- [x] Modificar `compels.resolveCompel` para agendar `continueAfterCompel` após persistir a resolução
+- [x] Testar fluxo completo: compel detectado → `awaiting_player_decision` → jogador resolve → continuação gera resto da resposta
 
 ---
 

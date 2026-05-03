@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { mutation, query, internalQuery, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 
@@ -13,6 +13,16 @@ async function assertCampaignOwnership(
   if (campaign.userId !== userId) throw new ConvexError("Unauthorized");
   return campaign;
 }
+
+export const getByCampaignIdInternal = internalQuery({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("characters")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .first();
+  },
+});
 
 export const getCharacterHistory = query({
   args: {
