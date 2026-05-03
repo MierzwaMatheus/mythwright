@@ -85,6 +85,23 @@ export function buildWorldStateBlock(
   };
 }
 
+type Message = {
+  role: "user" | "assistant";
+  content: string;
+  status?: "ok" | "failed" | "pending";
+  [key: string]: unknown;
+};
+
+export function buildMessageWindow(
+  messages: Message[],
+  limit: number = 20
+): Array<{ role: "user" | "assistant"; content: string }> {
+  return messages
+    .filter((m) => m.status !== "failed")
+    .slice(-limit)
+    .map((m) => ({ role: m.role, content: m.content }));
+}
+
 export function buildCharacterBlock(character: Character): string {
   return JSON.stringify({
     aspects: character.aspects,

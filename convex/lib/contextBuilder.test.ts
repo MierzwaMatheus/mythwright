@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { buildCharacterBlock, buildSceneBlock, buildWorldStateBlock } from "./contextBuilder";
+import { buildCharacterBlock, buildSceneBlock, buildWorldStateBlock, buildMessageWindow } from "./contextBuilder";
 
 const baseCharacter = {
   _id: "characters:abc123" as any,
@@ -261,5 +261,52 @@ describe("buildWorldStateBlock", () => {
 
     expect(result.player_knowledge.facts).toHaveLength(1);
     expect(result.player_knowledge.facts[0].content).toBe(knownFact.content);
+  });
+});
+
+describe("buildMessageWindow", () => {
+  function makeMessage(
+    index: number,
+    opts: { role?: "user" | "assistant"; status?: "ok" | "failed" | "pending" } = {}
+  ) {
+    return {
+      role: (opts.role ?? (index % 2 === 0 ? "user" : "assistant")) as "user" | "assistant",
+      content: `message-${index}`,
+      status: opts.status ?? "ok",
+      _id: `msg:${index}`,
+      _creationTime: index,
+    };
+  }
+
+  test("retorna as últimas 20 mensagens de um histórico de 30, excluindo failed antes de aplicar o limite", () => {
+    // Cria 30 mensagens: mensagens de índice 5, 15 e 25 são failed
+    const messages = Array.from({ length: 30 }, (_, i) => {
+      const isFailed = i === 5 || i === 15 || i === 25;
+      return makeMessage(i, { status: isFailed ? "failed" : "ok" });
+    });
+
+    // Após filtrar os 3 failed, restam 27 mensagens válidas (índices 0..4, 6..14, 16..24, 26..29)
+    // As últimas 20 dessas 27 são as de índice 7..14, 16..24, 26..29
+    const result = buildMessageWindow(messages, 20);
+
+    expect(result).toHaveLength(20);
+
+    // Nenhuma mensagem failed deve aparecer
+    const contents = result.map((m) => m.content);
+    expect(contents).not.toContain("message-5");
+    expect(contents).not.toContain("message-15");
+    expect(contents).not.toContain("message-25");
+
+    // A última mensagem deve ser message-29 (última do histórico, não-failed)
+    expect(result[result.length - 1].content).toBe("message-29");
+
+    // Cada item deve ter apenas role e content
+    result.forEach((m) => {
+      expect(m).toHaveProperty("role");
+      expect(m).toHaveProperty("content");
+      expect(m).not.toHaveProperty("status");
+      expect(m).not.toHaveProperty("_id");
+      expect(m).not.toHaveProperty("_creationTime");
+    });
   });
 });
