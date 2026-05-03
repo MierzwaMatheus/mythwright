@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 import { describe, it, expect } from "vitest";
 import { buildAntiLeakPrompt, parseAntiLeakResponse } from "./antiLeak";
 
