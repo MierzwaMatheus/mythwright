@@ -118,19 +118,19 @@ Referências a `@docs/` indicam onde buscar contexto antes de implementar.
 
 > Contexto: `@docs/02-technical-architecture.md` §3 (pseudocódigo completo dos 8 estágios) e `@docs/01-gap-report.md` G-001, G-017, G-018, G-024, G-025
 
-- [ ] **Estágio 1:** garantir persistência da mensagem do jogador com contrato claro (idempotência por `clientMessageId`)
-- [ ] **Idempotência:** guard no início verificando se já existe mensagem GM com `causedByMessageId == playerMessageId` — se sim, retornar sem reprocessar (G-018)
-- [ ] **Estágio 2:** integrar `buildFullContext` de `convex/lib/contextBuilder.ts` com dados reais (entidades, cena, histórico de mensagens, sumários); gerar embedding da mensagem do jogador
-- [ ] **Estágio 3:** integrar `classifyTriggers` + `resolveTriggerEffects` (pré-filtro determinístico → vectorSearch top-K → classify → executar)
-- [ ] **Estágio 4:** substituir chamada única por loop de streaming + tool calling (usa G-002 e G-003)
-- [ ] **Estágio 5:** buscar hidden facts relevantes via vectorSearch antes de passar para `validateAntiLeak` (em vez de receber lista arbitrária do caller) (G-024)
-- [ ] **Estágio 6:** confirmar que `extractAndPersistFacts` roda em paralelo com estágio 5 (já implementado, revisar se é paralelo)
-- [ ] **Estágio 7:** housekeeping — persistir `triggersFired` e `factsRevealed` na mensagem GM; persistir `tokensUsed` da resposta
-- [ ] **Estágio 8:** ao detectar mudança de cena, agendar `summarizeScene` da cena encerrada
-- [ ] Usar `buildGmSystemPrompt` (G-011) no contexto enviado ao LLM
-- [ ] Suite de testes completa dos 8 estágios com mocks de LLM e embedding (G-025)
-- [ ] Testar idempotência: action re-agendada não gera resposta duplicada
-- [ ] Testar regeneração por vazamento: anti-leak falha → regenera com memória do turno
+- [x] **Estágio 1:** garantir persistência da mensagem do jogador com contrato claro (idempotência por `clientMessageId`)
+- [x] **Idempotência:** guard no início verificando se já existe mensagem GM com `causedByMessageId == playerMessageId` — se sim, retornar sem reprocessar (G-018)
+- [x] **Estágio 2:** integrar `buildFullContext` de `convex/lib/contextBuilder.ts` com dados reais (entidades, cena, histórico de mensagens, sumários); gerar embedding da mensagem do jogador
+- [x] **Estágio 3:** integrar `classifyTriggers` + `resolveTriggerEffects` (pré-filtro determinístico → vectorSearch top-K → classify → executar)
+- [x] **Estágio 4:** substituir chamada única por loop de streaming + tool calling (usa G-002 e G-003)
+- [x] **Estágio 5:** buscar hidden facts relevantes via vectorSearch antes de passar para `validateAntiLeak` (em vez de receber lista arbitrária do caller) (G-024)
+- [x] **Estágio 6:** confirmar que `extractAndPersistFacts` roda em paralelo com estágio 5 (já implementado, revisar se é paralelo)
+- [x] **Estágio 7:** housekeeping — persistir `triggersFired` e `factsRevealed` na mensagem GM; persistir `tokensUsed` da resposta
+- [x] **Estágio 8:** ao detectar mudança de cena, agendar `summarizeScene` da cena encerrada
+- [x] Usar `buildGmSystemPrompt` (G-011) no contexto enviado ao LLM
+- [x] Suite de testes completa dos 8 estágios com mocks de LLM e embedding (G-025)
+- [x] Testar idempotência: action re-agendada não gera resposta duplicada
+- [x] Testar regeneração por vazamento: anti-leak falha → regenera com memória do turno
 
 ### Continuação Pós-Compel — G-014
 

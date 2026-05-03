@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 
 export const createCampaign = mutation({
@@ -131,6 +131,13 @@ export const deleteCampaign = mutation({
     }
 
     await ctx.db.delete(args.campaignId);
+  },
+});
+
+export const getByIdInternal = internalQuery({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.campaignId);
   },
 });
 

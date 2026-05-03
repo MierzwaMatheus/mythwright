@@ -26,6 +26,7 @@ import type * as lib_tokenCounter from "../lib/tokenCounter.js";
 import type * as lib_vectorSearch from "../lib/vectorSearch.js";
 import type * as messages from "../messages.js";
 import type * as processTurn from "../processTurn.js";
+import type * as processTurnFull from "../processTurnFull.js";
 import type * as prompts_antiLeak from "../prompts/antiLeak.js";
 import type * as prompts_arcSummarizer from "../prompts/arcSummarizer.js";
 import type * as prompts_factExtraction from "../prompts/factExtraction.js";
@@ -69,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   "lib/vectorSearch": typeof lib_vectorSearch;
   messages: typeof messages;
   processTurn: typeof processTurn;
+  processTurnFull: typeof processTurnFull;
   "prompts/antiLeak": typeof prompts_antiLeak;
   "prompts/arcSummarizer": typeof prompts_arcSummarizer;
   "prompts/factExtraction": typeof prompts_factExtraction;

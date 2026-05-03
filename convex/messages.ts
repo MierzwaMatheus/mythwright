@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 
@@ -99,6 +99,98 @@ export const getMessageContent = query({
       throw new Error(`Message not found: ${args.messageId}`);
     }
     return message.content;
+  },
+});
+
+export const getByIdInternal = internalQuery({
+  args: { messageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.messageId);
+  },
+});
+
+export const findGmByCausedByInternal = internalQuery({
+  args: { causedByMessageId: v.id("messages") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_caused_by", (q) => q.eq("causedByMessageId", args.causedByMessageId))
+      .filter((q) => q.eq(q.field("role"), "gm"))
+      .first();
+  },
+});
+
+export const createGmStubInternal = internalMutation({
+  args: {
+    campaignId: v.id("campaigns"),
+    causedByMessageId: v.id("messages"),
+    sceneId: v.optional(v.id("scenes")),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db.insert("messages", {
+      campaignId: args.campaignId,
+      role: "gm",
+      content: "",
+      clientMessageId: "gm-" + Date.now() + "-" + Math.random(),
+      status: "pending",
+      createdAt: Date.now(),
+      causedByMessageId: args.causedByMessageId,
+      ...(args.sceneId !== undefined ? { sceneId: args.sceneId } : {}),
+    });
+  },
+});
+
+export const finalizeTurnMessageInternal = internalMutation({
+  args: {
+    gmMessageId: v.id("messages"),
+    triggersFired: v.array(v.id("triggers")),
+    factsRevealed: v.array(v.id("facts")),
+    tokensUsed: v.optional(v.object({ input: v.number(), output: v.number() })),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.gmMessageId, {
+      status: "complete",
+      finalizedAt: Date.now(),
+      triggersFired: args.triggersFired,
+      factsRevealed: args.factsRevealed,
+      ...(args.tokensUsed !== undefined ? { tokensUsed: args.tokensUsed } : {}),
+    });
+    const gmMessage = await ctx.db.get(args.gmMessageId);
+    if (gmMessage) {
+      await ctx.db.patch(gmMessage.campaignId, { lastActivityAt: Date.now() });
+    }
+  },
+});
+
+export const countBySceneInternal = internalQuery({
+  args: { sceneId: v.id("scenes") },
+  handler: async (ctx, args) => {
+    const msgs = await ctx.db
+      .query("messages")
+      .withIndex("by_scene_and_createdAt", (q) => q.eq("sceneId", args.sceneId))
+      .take(100);
+    return msgs.length;
+  },
+});
+
+export const getRecentBySceneInternal = internalQuery({
+  args: { sceneId: v.id("scenes"), limit: v.number() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("messages")
+      .withIndex("by_scene_and_createdAt", (q) => q.eq("sceneId", args.sceneId))
+      .order("desc")
+      .take(args.limit);
+  },
+});
+
+export const setEmbeddingInternal = internalMutation({
+  args: {
+    messageId: v.id("messages"),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.messageId, { embedding: args.embedding });
   },
 });
 
