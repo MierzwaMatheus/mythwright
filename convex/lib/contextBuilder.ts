@@ -1,3 +1,5 @@
+import { estimateTokenCount } from "./tokenCounter";
+
 type Character = {
   name: string;
   aspects: string[];
@@ -156,6 +158,11 @@ export function buildFullContext(
   // 8. última mensagem user por último
   if (lastUserMessage) {
     result.push({ role: lastUserMessage.role, content: lastUserMessage.content });
+  }
+
+  const totalTokens = result.reduce((sum, block) => sum + estimateTokenCount(block.content), 0);
+  if (totalTokens > 14000) {
+    console.warn(`[buildFullContext] Contexto excede 14k tokens (estimado: ${totalTokens} tokens). Considere reduzir o tamanho do contexto.`);
   }
 
   return result;
