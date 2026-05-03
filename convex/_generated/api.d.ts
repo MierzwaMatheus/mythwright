@@ -10,6 +10,7 @@
 
 import type * as campaigns from "../campaigns.js";
 import type * as characters from "../characters.js";
+import type * as consequences from "../consequences.js";
 import type * as entities from "../entities.js";
 import type * as facts from "../facts.js";
 import type * as lib_auth from "../lib/auth.js";
@@ -28,6 +29,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   campaigns: typeof campaigns;
   characters: typeof characters;
+  consequences: typeof consequences;
   entities: typeof entities;
   facts: typeof facts;
   "lib/auth": typeof lib_auth;
