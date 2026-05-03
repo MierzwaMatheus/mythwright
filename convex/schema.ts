@@ -77,6 +77,10 @@ export default defineSchema({
 
   triggers: defineTable({
     campaignId: v.id("campaigns"),
+    description: v.string(),
+    scope: v.string(),
+    effects: v.array(v.object({ type: v.string(), payload: v.any() })),
+    status: v.union(v.literal("armed"), v.literal("disabled")),
   }).index("by_campaign", ["campaignId"]),
 
   summaries: defineTable({

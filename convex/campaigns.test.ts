@@ -598,6 +598,14 @@ describe("campaigns.deleteCampaign", () => {
             content: "Fato de teste.",
             visibility: "known",
           });
+        } else if (table === "triggers") {
+          await ctx.db.insert(table, {
+            campaignId,
+            description: "Gatilho de teste.",
+            scope: "global",
+            effects: [],
+            status: "armed",
+          });
         } else {
           await ctx.db.insert(table, { campaignId });
         }
