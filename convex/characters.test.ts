@@ -347,3 +347,74 @@ describe("characters.updateCharacterField", () => {
     });
   });
 });
+
+describe("characters.spendFatePoint", () => {
+  it("erro saldo zero — rejeita com ConvexError quando fatePoints é 0", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|sfp001", "sfp001@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 0,
+    });
+
+    await expect(
+      identity.mutation(api.characters.spendFatePoint, {
+        characterId: characterId as Id<"characters">,
+        reason: "test",
+      }),
+    ).rejects.toThrow("Sem pontos de destino disponíveis");
+  });
+
+  it("happy path — decrementa fatePoints de 3 para 2", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|sfp002", "sfp002@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    await identity.mutation(api.characters.spendFatePoint, {
+      characterId: characterId as Id<"characters">,
+      reason: "Invocação de aspecto",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId as Id<"characters">);
+      expect(character!.fatePoints).toBe(2);
+    });
+  });
+
+  it("registro no log — grava entrada com campos corretos em characterEditLogs", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|sfp003", "sfp003@test.com");
+
+    const characterId = await identity.mutation(api.characters.createCharacter, {
+      ...defaultCharacterInput,
+      campaignId,
+      fatePoints: 3,
+    });
+
+    await identity.mutation(api.characters.spendFatePoint, {
+      characterId: characterId as Id<"characters">,
+      reason: "Invocação de aspecto",
+    });
+
+    await t.run(async (ctx) => {
+      const logs = await ctx.db
+        .query("characterEditLogs")
+        .withIndex("by_character", (q) => q.eq("characterId", characterId as Id<"characters">))
+        .collect();
+
+      expect(logs).toHaveLength(1);
+      expect(logs[0].field).toBe("fatePoints");
+      expect(logs[0].oldValue).toBe(3);
+      expect(logs[0].newValue).toBe(2);
+      expect(logs[0].reason).toBe("Invocação de aspecto");
+      expect(typeof logs[0].timestamp).toBe("number");
+    });
+  });
+});

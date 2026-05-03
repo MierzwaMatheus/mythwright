@@ -81,5 +81,6 @@ export default defineSchema({
     newValue: v.any(),
     timestamp: v.number(),
     messageId: v.optional(v.id("messages")),
+    reason: v.optional(v.string()),
   }).index("by_character", ["characterId"]),
 });

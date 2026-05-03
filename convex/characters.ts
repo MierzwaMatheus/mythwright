@@ -50,6 +50,38 @@ export const createCharacter = mutation({
   },
 });
 
+export const spendFatePoint = mutation({
+  args: {
+    characterId: v.id("characters"),
+    reason: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new ConvexError("Not authenticated");
+    const character = await ctx.db.get(args.characterId);
+    if (!character) throw new ConvexError("Personagem não encontrado");
+    await assertCampaignOwnership(ctx, character.campaignId, user._id);
+
+    if (character.fatePoints === 0) {
+      throw new ConvexError("Sem pontos de destino disponíveis");
+    }
+
+    const oldValue = character.fatePoints;
+    const newValue = oldValue - 1;
+
+    await ctx.db.patch(args.characterId, { fatePoints: newValue });
+
+    await ctx.db.insert("characterEditLogs", {
+      characterId: args.characterId,
+      field: "fatePoints",
+      oldValue,
+      newValue,
+      timestamp: Date.now(),
+      reason: args.reason,
+    });
+  },
+});
+
 export const updateCharacterField = mutation({
   args: {
     characterId: v.id("characters"),
