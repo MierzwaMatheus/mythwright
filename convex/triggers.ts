@@ -1,7 +1,8 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import { mutation, query, action, internalQuery, internalMutation, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
+import { api, internal } from "./_generated/api";
 
 async function assertCampaignOwnership(
   ctx: MutationCtx,
@@ -49,6 +50,44 @@ export const updateTriggerStatus = mutation({
 
     await assertCampaignOwnership(ctx, trigger.campaignId, user._id);
     await ctx.db.patch(args.triggerId, { status: args.status });
+  },
+});
+
+export const getTriggerById = internalQuery({
+  args: { triggerId: v.id("triggers") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.triggerId);
+  },
+});
+
+export const markTriggerFired = internalMutation({
+  args: { triggerId: v.id("triggers") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.triggerId, { status: "fired", firedAt: Date.now() });
+  },
+});
+
+export const resolveTriggerEffects = action({
+  args: { triggeredIds: v.array(v.id("triggers")) },
+  handler: async (ctx, args) => {
+    for (const triggerId of args.triggeredIds) {
+      const trigger: Doc<"triggers"> | null = await ctx.runQuery(
+        internal.triggers.getTriggerById,
+        { triggerId },
+      );
+
+      if (!trigger) continue;
+
+      for (const effect of trigger.effects) {
+        if (effect.type === "change_fact_visibility") {
+          await ctx.runMutation(api.facts.changeFactVisibility, effect.payload);
+        } else if (effect.type === "change_entity_visibility") {
+          await ctx.runMutation(api.entities.changeEntityVisibility, effect.payload);
+        }
+      }
+
+      await ctx.runMutation(internal.triggers.markTriggerFired, { triggerId });
+    }
   },
 });
 

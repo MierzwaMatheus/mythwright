@@ -15,6 +15,23 @@ async function assertCampaignOwnership(
   return campaign;
 }
 
+export const changeEntityVisibility = mutation({
+  args: {
+    entityId: v.id("entities"),
+    visibility: v.union(v.literal("hidden"), v.literal("known")),
+  },
+  handler: async (ctx, args) => {
+    const user = await getAuthenticatedUser(ctx);
+    if (!user) throw new ConvexError("Not authenticated");
+
+    const entity = await ctx.db.get(args.entityId);
+    if (!entity) throw new ConvexError("Entity not found");
+
+    await assertCampaignOwnership(ctx, entity.campaignId, user._id);
+    await ctx.db.patch(args.entityId, { visibility: args.visibility });
+  },
+});
+
 export const createEntity = mutation({
   args: {
     campaignId: v.id("campaigns"),

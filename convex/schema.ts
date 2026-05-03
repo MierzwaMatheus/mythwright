@@ -80,7 +80,8 @@ export default defineSchema({
     description: v.string(),
     scope: v.string(),
     effects: v.array(v.object({ type: v.string(), payload: v.any() })),
-    status: v.union(v.literal("armed"), v.literal("disabled")),
+    status: v.union(v.literal("armed"), v.literal("disabled"), v.literal("fired")),
+    firedAt: v.optional(v.number()),
   }).index("by_campaign", ["campaignId"]),
 
   summaries: defineTable({

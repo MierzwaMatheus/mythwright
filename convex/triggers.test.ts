@@ -178,6 +178,132 @@ describe("triggers.updateTriggerStatus", () => {
   });
 });
 
+describe("triggers.resolveTriggerEffects", () => {
+  it("executa change_entity_visibility e marca trigger como fired", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|rte002", "rte002@test.com");
+
+    const entityId = await identity.mutation(api.entities.createEntity, {
+      campaignId,
+      type: "npc",
+      name: "Guarda Real",
+      visibility: "hidden",
+      description: "Um guarda secreto do rei.",
+    });
+
+    const triggerId = await identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: "Revelar o guarda quando o rei for mencionado.",
+      scope: "global",
+      effects: [
+        {
+          type: "change_entity_visibility",
+          payload: { entityId, visibility: "known" },
+        },
+      ],
+    });
+
+    await identity.action(api.triggers.resolveTriggerEffects, {
+      triggeredIds: [triggerId as Id<"triggers">],
+    });
+
+    await t.run(async (ctx) => {
+      const entity = await ctx.db.get(entityId as Id<"entities">);
+      expect(entity!.visibility).toBe("known");
+
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("fired");
+      expect(trigger!.firedAt).toBeTypeOf("number");
+    });
+  });
+
+  it("executa change_fact_visibility e marca trigger como fired", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|rte001", "rte001@test.com");
+
+    const factId = await identity.mutation(api.facts.createFact, {
+      campaignId,
+      content: "O rei é um traidor.",
+      visibility: "hidden",
+    });
+
+    const triggerId = await identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: "Revelar o fato quando o rei for mencionado.",
+      scope: "global",
+      effects: [
+        {
+          type: "change_fact_visibility",
+          payload: { factId, visibility: "known" },
+        },
+      ],
+    });
+
+    await identity.action(api.triggers.resolveTriggerEffects, {
+      triggeredIds: [triggerId as Id<"triggers">],
+    });
+
+    await t.run(async (ctx) => {
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("known");
+
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("fired");
+      expect(trigger!.firedAt).toBeTypeOf("number");
+    });
+  });
+  it("executa multiplos efeitos em sequencia e marca trigger como fired", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|rte003", "rte003@test.com");
+
+    const factId = await identity.mutation(api.facts.createFact, {
+      campaignId,
+      content: "Segredo da aliança.",
+      visibility: "hidden",
+    });
+
+    const entityId = await identity.mutation(api.entities.createEntity, {
+      campaignId,
+      type: "faction",
+      name: "Aliança Sombria",
+      visibility: "hidden",
+      description: "Uma facção secreta.",
+    });
+
+    const triggerId = await identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: "Revelar tudo sobre a aliança.",
+      scope: "global",
+      effects: [
+        {
+          type: "change_fact_visibility",
+          payload: { factId, visibility: "known" },
+        },
+        {
+          type: "change_entity_visibility",
+          payload: { entityId, visibility: "known" },
+        },
+      ],
+    });
+
+    await identity.action(api.triggers.resolveTriggerEffects, {
+      triggeredIds: [triggerId as Id<"triggers">],
+    });
+
+    await t.run(async (ctx) => {
+      const fact = await ctx.db.get(factId as Id<"facts">);
+      expect(fact!.visibility).toBe("known");
+
+      const entity = await ctx.db.get(entityId as Id<"entities">);
+      expect(entity!.visibility).toBe("known");
+
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("fired");
+      expect(trigger!.firedAt).toBeTypeOf("number");
+    });
+  });
+});
+
 describe("triggers.getArmedTriggersByScope", () => {
   async function createTrigger(
     identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
