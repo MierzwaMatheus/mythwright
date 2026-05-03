@@ -97,3 +97,83 @@ describe("triggers.createTrigger", () => {
     ).rejects.toThrow(ConvexError);
   });
 });
+
+describe("triggers.updateTriggerStatus", () => {
+  async function createArmedTrigger(
+    identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
+    campaignId: Id<"campaigns">,
+  ) {
+    return identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: "Gatilho de teste.",
+      scope: "global",
+      effects: [],
+    });
+  }
+
+  it("armed → disabled é válido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|uts001", "uts001@test.com");
+    const triggerId = await createArmedTrigger(identity, campaignId);
+
+    await identity.mutation(api.triggers.updateTriggerStatus, {
+      triggerId: triggerId as Id<"triggers">,
+      status: "disabled",
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("disabled");
+    });
+  });
+
+  it("disabled → armed é válido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|uts002", "uts002@test.com");
+    const triggerId = await createArmedTrigger(identity, campaignId);
+    await identity.mutation(api.triggers.updateTriggerStatus, {
+      triggerId: triggerId as Id<"triggers">,
+      status: "disabled",
+    });
+
+    await identity.mutation(api.triggers.updateTriggerStatus, {
+      triggerId: triggerId as Id<"triggers">,
+      status: "armed",
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as Id<"triggers">);
+      expect(trigger!.status).toBe("armed");
+    });
+  });
+
+  it("trigger disabled não aparece em getArmedTriggersByScope", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|uts003", "uts003@test.com");
+    const triggerId = await createArmedTrigger(identity, campaignId);
+
+    await identity.mutation(api.triggers.updateTriggerStatus, {
+      triggerId: triggerId as Id<"triggers">,
+      status: "disabled",
+    });
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it("sem autenticacao — rejeita com ConvexError", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|uts004", "uts004@test.com");
+    const triggerId = await createArmedTrigger(identity, campaignId);
+
+    await expect(
+      t.mutation(api.triggers.updateTriggerStatus, {
+        triggerId: triggerId as Id<"triggers">,
+        status: "disabled",
+      }),
+    ).rejects.toThrow(ConvexError);
+  });
+});
