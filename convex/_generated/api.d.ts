@@ -20,6 +20,7 @@ import type * as lib_contextBuilder from "../lib/contextBuilder.js";
 import type * as lib_crypto from "../lib/crypto.js";
 import type * as lib_tokenCounter from "../lib/tokenCounter.js";
 import type * as messages from "../messages.js";
+import type * as processTurn from "../processTurn.js";
 import type * as prompts_antiLeak from "../prompts/antiLeak.js";
 import type * as sceneAspects from "../sceneAspects.js";
 import type * as scenes from "../scenes.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   "lib/crypto": typeof lib_crypto;
   "lib/tokenCounter": typeof lib_tokenCounter;
   messages: typeof messages;
+  processTurn: typeof processTurn;
   "prompts/antiLeak": typeof prompts_antiLeak;
   sceneAspects: typeof sceneAspects;
   scenes: typeof scenes;
