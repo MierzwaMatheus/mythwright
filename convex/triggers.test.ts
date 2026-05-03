@@ -177,3 +177,95 @@ describe("triggers.updateTriggerStatus", () => {
     ).rejects.toThrow(ConvexError);
   });
 });
+
+describe("triggers.getArmedTriggersByScope", () => {
+  async function createTrigger(
+    identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
+    campaignId: Id<"campaigns">,
+    scope: string,
+  ) {
+    return identity.mutation(api.triggers.createTrigger, {
+      campaignId,
+      description: `Gatilho de ${scope}.`,
+      scope,
+      effects: [],
+    });
+  }
+
+  it("retorna apenas gatilhos global quando sceneId não fornecido", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats001", "gats001@test.com");
+
+    await createTrigger(identity, campaignId, "global");
+    await createTrigger(identity, campaignId, "scene_001");
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].scope).toBe("global");
+  });
+
+  it("retorna global e da sceneId correta quando sceneId fornecida", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats002", "gats002@test.com");
+
+    await createTrigger(identity, campaignId, "global");
+    await createTrigger(identity, campaignId, "scene_001");
+    await createTrigger(identity, campaignId, "scene_002");
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId,
+      sceneId: "scene_001",
+    });
+
+    expect(results).toHaveLength(2);
+    const scopes = results.map((r) => r.scope);
+    expect(scopes).toContain("global");
+    expect(scopes).toContain("scene_001");
+    expect(scopes).not.toContain("scene_002");
+  });
+
+  it("não retorna gatilhos disabled mesmo que scope bata", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats003", "gats003@test.com");
+
+    const triggerId = await createTrigger(identity, campaignId, "global");
+    await identity.mutation(api.triggers.updateTriggerStatus, {
+      triggerId: triggerId as Id<"triggers">,
+      status: "disabled",
+    });
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it("não retorna gatilhos de outra campanha", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats004", "gats004@test.com");
+    const { campaignId: otherCampaignId } = await setupUserAndCampaign(t, "token|gats004b", "gats004b@test.com");
+
+    await createTrigger(identity, campaignId, "global");
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId: otherCampaignId,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+
+  it("retorna lista vazia quando não há gatilhos armed", async () => {
+    const t = convexTest(schema, modules);
+    const { identity, campaignId } = await setupUserAndCampaign(t, "token|gats005", "gats005@test.com");
+
+    const results = await identity.query(api.triggers.getArmedTriggersByScope, {
+      campaignId,
+    });
+
+    expect(results).toHaveLength(0);
+  });
+});
