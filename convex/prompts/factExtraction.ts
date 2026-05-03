@@ -4,7 +4,6 @@ import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const FACT_EXTRACTION_MODEL = "openai/gpt-4o-mini";
 
 const VALID_VISIBILITIES = new Set(["hidden", "rumored", "known"]);
 
@@ -130,15 +129,11 @@ export const extractAndPersistFacts = internalAction({
     campaignId: v.id("campaigns"),
   },
   handler: async (ctx, args): Promise<Id<"facts">[]> => {
-    const gmResponse: string | null = await ctx.runQuery(
-      internal.prompts.factExtraction.getMessageContent,
-      { messageId: args.messageId },
-    );
-
-    const existingFacts: Array<{ content: string }> = await ctx.runQuery(
-      internal.facts.getFactsByCampaignInternal,
-      { campaignId: args.campaignId },
-    );
+    const [gmResponse, existingFacts, llmConfig] = await Promise.all([
+      ctx.runQuery(internal.prompts.factExtraction.getMessageContent, { messageId: args.messageId }),
+      ctx.runQuery(internal.facts.getFactsByCampaignInternal, { campaignId: args.campaignId }),
+      ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, { campaignId: args.campaignId }),
+    ]);
 
     const prompt = buildFactExtractionPrompt(gmResponse ?? "", existingFacts);
 
@@ -149,7 +144,7 @@ export const extractAndPersistFacts = internalAction({
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: FACT_EXTRACTION_MODEL,
+        model: llmConfig.extractionModel,
         messages: [{ role: "user", content: prompt }],
       }),
     });

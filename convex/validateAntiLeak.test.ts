@@ -28,19 +28,20 @@ describe("validateAntiLeak", () => {
         createdAt: Date.now(),
         lastActivityAt: Date.now(),
       });
-      return await ctx.db.insert("messages", {
+      const messageId = await ctx.db.insert("messages", {
         campaignId,
         role: "gm",
         content,
         clientMessageId: "msg-test-" + Math.random(),
         status: "complete",
       });
+      return { messageId, campaignId };
     });
   }
 
   it("retorna { vazou: false, facts: [], trechos: [] } quando LLM responde sem vazamento", async () => {
     const t = convexTest(schema, modules);
-    const messageId = await setupMessageAndGetId(t, "O cavaleiro explorou a floresta.");
+    const { messageId, campaignId } = await setupMessageAndGetId(t, "O cavaleiro explorou a floresta.");
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -50,6 +51,7 @@ describe("validateAntiLeak", () => {
 
     const result = await t.action(internal.prompts.antiLeak.validateAntiLeak, {
       messageId,
+      campaignId,
       hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
     });
 
@@ -58,7 +60,7 @@ describe("validateAntiLeak", () => {
 
   it("retorna os dados de vazamento quando LLM detecta vazamento", async () => {
     const t = convexTest(schema, modules);
-    const messageId = await setupMessageAndGetId(t, "O rei já não governa mais esse reino.");
+    const { messageId, campaignId } = await setupMessageAndGetId(t, "O rei já não governa mais esse reino.");
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -68,6 +70,7 @@ describe("validateAntiLeak", () => {
 
     const result = await t.action(internal.prompts.antiLeak.validateAntiLeak, {
       messageId,
+      campaignId,
       hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
     });
 
@@ -80,7 +83,7 @@ describe("validateAntiLeak", () => {
 
   it("retorna { vazou: false, facts: [], trechos: [] } quando LLM retorna JSON malformado", async () => {
     const t = convexTest(schema, modules);
-    const messageId = await setupMessageAndGetId(t, "Texto qualquer.");
+    const { messageId, campaignId } = await setupMessageAndGetId(t, "Texto qualquer.");
 
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
       json: async () => ({
@@ -90,6 +93,7 @@ describe("validateAntiLeak", () => {
 
     const result = await t.action(internal.prompts.antiLeak.validateAntiLeak, {
       messageId,
+      campaignId,
       hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
     });
 
