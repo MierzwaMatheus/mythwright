@@ -71,7 +71,9 @@ export default defineSchema({
     name: v.string(),
     visibility: v.union(v.literal("hidden"), v.literal("known")),
     description: v.string(),
-  }).index("by_campaign", ["campaignId"]),
+  }).index("by_campaign", ["campaignId"])
+    .index("by_campaign_and_visibility", ["campaignId", "visibility"])
+    .index("by_campaign_and_type", ["campaignId", "type"]),
 
   facts: defineTable({
     campaignId: v.id("campaigns"),
