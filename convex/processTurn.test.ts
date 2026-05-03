@@ -284,3 +284,117 @@ describe("processTurn (K1 — estágios com clientMessageId)", () => {
     });
   });
 });
+
+describe("processTurn (K2 — tool calls)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("HP1: LLM retorna tool_call JSON → content concatenado e toolCalls populado", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    const toolCallPayload = JSON.stringify({
+      type: "tool_call",
+      textBefore: "Você rola os dados...",
+      toolName: "roll_fate_dice",
+      toolParams: { numDice: 4 },
+      toolResult: { dice: ["+", "+", "-", "0"], total: 1 },
+      textAfter: "Resultado: +1. Você tem sucesso!",
+    });
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        // Estágio 2: LLM retorna tool call
+        return { json: async () => ({ choices: [{ message: { content: toolCallPayload } }] }) };
+      } else if (callCount === 2) {
+        // Estágio 4: antiLeak — não vazou
+        return {
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        // Estágio 6: extractAndPersistFacts
+        return {
+          json: async () => ({
+            choices: [{
+              message: {
+                content: JSON.stringify({ facts: [] }),
+              },
+            }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-k2-001",
+      hiddenFacts: [],
+      playerMessageContent: "Rolo os dados!",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.content).toBe("Você rola os dados... Resultado: +1. Você tem sucesso!");
+      expect((msg as any)!.toolCalls).toHaveLength(1);
+      expect((msg as any)!.toolCalls[0].toolName).toBe("roll_fate_dice");
+      expect((msg as any)!.toolCalls[0].toolParams).toEqual({ numDice: 4 });
+      expect((msg as any)!.toolCalls[0].toolResult).toEqual({ dice: ["+", "+", "-", "0"], total: 1 });
+      expect(typeof (msg as any)!.toolCalls[0].executedAt).toBe("number");
+    });
+  });
+
+  it("HP2: LLM retorna texto simples → comportamento igual ao K1 (sem regressão)", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) {
+        return { json: async () => ({ choices: [{ message: { content: "Texto simples do GM." } }] }) };
+      } else if (callCount === 2) {
+        return {
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        return {
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      clientMessageId: "player-msg-k2-002",
+      hiddenFacts: [],
+      playerMessageContent: "O que acontece?",
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.content).toBe("Texto simples do GM.");
+      // Sem tool calls
+      const toolCalls = (msg as any)!.toolCalls;
+      expect(toolCalls === undefined || toolCalls === null || toolCalls.length === 0).toBe(true);
+    });
+  });
+});

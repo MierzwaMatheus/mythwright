@@ -7,6 +7,38 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const GM_MODEL = "openai/gpt-4o-mini";
 const MAX_REGENERATIONS = 2; // 3 tentativas no total (0, 1, 2)
 
+type ToolCallRecord = {
+  toolName: string;
+  toolParams: unknown;
+  toolResult: unknown;
+  executedAt: number;
+};
+
+type ParsedLlmResponse = {
+  content: string;
+  toolCalls?: ToolCallRecord[];
+};
+
+function parseLlmResponse(raw: string): ParsedLlmResponse {
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.type === "tool_call") {
+      return {
+        content: `${parsed.textBefore} ${parsed.textAfter}`,
+        toolCalls: [{
+          toolName: parsed.toolName,
+          toolParams: parsed.toolParams,
+          toolResult: parsed.toolResult,
+          executedAt: Date.now(),
+        }],
+      };
+    }
+  } catch {
+    // Não é JSON — trata como texto simples
+  }
+  return { content: raw };
+}
+
 async function callLlm(playerMessageContent: string): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -37,6 +69,12 @@ export const createGmMessage = internalMutation({
   args: {
     campaignId: v.id("campaigns"),
     content: v.string(),
+    toolCalls: v.optional(v.array(v.object({
+      toolName: v.string(),
+      toolParams: v.any(),
+      toolResult: v.any(),
+      executedAt: v.number(),
+    }))),
   },
   handler: async (ctx, args): Promise<Id<"messages">> => {
     return await ctx.db.insert("messages", {
@@ -46,6 +84,7 @@ export const createGmMessage = internalMutation({
       clientMessageId: "gm-" + Date.now() + "-" + Math.random(),
       status: "pending",
       createdAt: Date.now(),
+      ...(args.toolCalls !== undefined ? { toolCalls: args.toolCalls } : {}),
     });
   },
 });
@@ -60,11 +99,13 @@ export const processTurn = internalAction({
   },
   handler: async (ctx, args): Promise<{ success: true; messageId: Id<"messages"> } | { success: false; reason: string }> => {
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
-      const gmContent = await callLlm(args.playerMessageContent);
+      const rawLlmContent = await callLlm(args.playerMessageContent);
+      const { content: gmContent, toolCalls } = parseLlmResponse(rawLlmContent);
 
       const messageId: Id<"messages"> = await ctx.runMutation(internal.processTurn.createGmMessage, {
         campaignId: args.campaignId,
         content: gmContent,
+        toolCalls,
       });
 
       const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
