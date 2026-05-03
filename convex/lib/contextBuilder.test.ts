@@ -1,5 +1,5 @@
 import { describe, test, expect } from "vitest";
-import { buildCharacterBlock } from "./contextBuilder";
+import { buildCharacterBlock, buildSceneBlock } from "./contextBuilder";
 
 const baseCharacter = {
   _id: "characters:abc123" as any,
@@ -72,5 +72,93 @@ describe("buildCharacterBlock", () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.skills).toEqual({});
+  });
+});
+
+describe("buildSceneBlock", () => {
+  const baseScene = {
+    title: "Taverna do Lobo Cinza",
+    description: "Uma taverna mal iluminada no porto",
+    status: "active" as const,
+  };
+
+  const knownNpc = {
+    name: "Mira",
+    visibility: "known" as const,
+    description: "Uma taverneira de olhos perspicazes",
+    type: "npc" as const,
+  };
+
+  const hiddenNpc = {
+    name: "Espião Secreto",
+    visibility: "hidden" as const,
+    description: "Ninguém sabe que ele existe",
+    type: "npc" as const,
+  };
+
+  const knownFact = {
+    content: "A taverna serve como ponto de encontro de mercadores",
+    visibility: "known" as const,
+  };
+
+  const rumoredFact = {
+    content: "Dizem que o dono guarda ouro embaixo do balcão",
+    visibility: "rumored" as const,
+  };
+
+  const hiddenFact = {
+    content: "O dono é na verdade um agente da guilda dos assassinos",
+    visibility: "hidden" as const,
+  };
+
+  test("entidades hidden nunca aparecem em npcsPresent", () => {
+    const result = buildSceneBlock(baseScene, [knownNpc, hiddenNpc], []);
+
+    expect(result.npcsPresent).toHaveLength(1);
+    expect(result.npcsPresent[0].name).toBe("Mira");
+    expect(result.npcsPresent.some((e: { name: string }) => e.name === "Espião Secreto")).toBe(false);
+  });
+
+  test("retorna location com o title da cena", () => {
+    const result = buildSceneBlock(baseScene, [], []);
+
+    expect(result.location).toBe("Taverna do Lobo Cinza");
+  });
+
+  test("npcsPresent contém apenas name e description (sem visibility)", () => {
+    const result = buildSceneBlock(baseScene, [knownNpc], []);
+
+    expect(result.npcsPresent[0]).toEqual({
+      name: "Mira",
+      description: "Uma taverneira de olhos perspicazes",
+    });
+    expect(result.npcsPresent[0]).not.toHaveProperty("visibility");
+  });
+
+  test("aspects inclui fatos known e rumored mas não hidden", () => {
+    const result = buildSceneBlock(baseScene, [], [knownFact, rumoredFact, hiddenFact]);
+
+    expect(result.aspects).toHaveLength(2);
+    expect(result.aspects).toContain(knownFact.content);
+    expect(result.aspects).toContain(rumoredFact.content);
+    expect(result.aspects).not.toContain(hiddenFact.content);
+  });
+
+  test("activeObjectives é sempre array vazio", () => {
+    const result = buildSceneBlock(baseScene, [knownNpc], [knownFact]);
+
+    expect(result.activeObjectives).toEqual([]);
+  });
+
+  test("entities vazio retorna npcsPresent vazio", () => {
+    const result = buildSceneBlock(baseScene, [], [knownFact]);
+
+    expect(result.npcsPresent).toEqual([]);
+  });
+
+  test("facts vazio retorna aspects vazio", () => {
+    const result = buildSceneBlock(baseScene, [knownNpc], []);
+
+    expect(result.aspects).toEqual([]);
   });
 });
