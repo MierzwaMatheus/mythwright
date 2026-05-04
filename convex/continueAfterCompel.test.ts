@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { api, internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { seedReadyCampaign } from "./_testHelpers";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -38,12 +39,12 @@ function compelAspectStream(aspectId: string, characterId: string) {
 async function setupBase(t: ReturnType<typeof convexTest>) {
   const identity = t.withIdentity({ tokenIdentifier: "token|cac001", email: "cac001@test.com" });
   await identity.mutation(api.users.upsertFromAuth, { displayName: "GM" });
-  const campaignId = await identity.mutation(api.campaigns.createCampaign, {
+  const campaignId = await seedReadyCampaign(t, identity, {
     name: "Campanha Compel",
     premise: "Aventura épica",
     tone: "dark",
     expectedDuration: "medium",
-  }) as Id<"campaigns">;
+  });
   const sceneId = await identity.mutation(api.scenes.createScene, {
     campaignId,
     title: "Cena inicial",

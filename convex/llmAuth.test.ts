@@ -3,6 +3,7 @@ import { convexTest } from "convex-test";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { api, internal } from "./_generated/api";
 import schema from "./schema";
+import { seedReadyCampaign } from "./_testHelpers";
 
 const modules = import.meta.glob("./**/*.ts");
 
@@ -35,12 +36,12 @@ async function setupCampaignForUser(
   t: ReturnType<typeof convexTest>,
   identity: ReturnType<ReturnType<typeof convexTest>["withIdentity"]>,
 ) {
-  return identity.mutation(api.campaigns.createCampaign, {
+  return seedReadyCampaign(t, identity, {
     name: "Campanha BYOK",
     premise: "Aventura épica.",
     tone: "dark fantasy",
     expectedDuration: "medium",
-  }) as Promise<import("./_generated/dataModel").Id<"campaigns">>;
+  });
 }
 
 // ---------------------------------------------------------------------------
