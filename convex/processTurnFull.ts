@@ -7,6 +7,7 @@ import { buildFullContext } from "./lib/contextBuilder";
 import { retrieveSemanticContext } from "./lib/semanticMemory";
 import { vectorSearch } from "./lib/vectorSearch";
 import { resolveOpenRouterKey, OpenRouterKeyMissingError } from "./lib/llmAuth";
+import { getFateTool } from "./tools/catalog";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -55,7 +56,9 @@ async function* parseStreamingResponse(
               let params: unknown = {};
               try {
                 params = JSON.parse(tc.function.arguments ?? "{}");
-              } catch {}
+              } catch {
+                console.warn("[G-113] Failed to parse tool arguments for", tc.function.name, "— using {}");
+              }
               yield {
                 type: "tool_call",
                 toolName: tc.function.name,
@@ -372,18 +375,32 @@ export const processTurnFull = internalAction({
                 messageId: gmMessageId,
               };
             } else {
-              const toolResult = await ctx.runMutation(
-                internal.tools.executor.executeFateTool,
-                {
-                  toolName: event.toolName,
-                  toolParams: event.toolParams,
-                  context: {
-                    campaignId: args.campaignId,
-                    messageId: gmMessageId,
-                    sceneId: (activeScene?._id ?? "") as Id<"scenes">,
-                  },
-                }
-              );
+              const knownTool = getFateTool(event.toolName);
+              if (!knownTool) {
+                console.warn("[G-113] Unknown tool call:", event.toolName, "— skipping execution");
+                const syntheticResult = { error: "unknown_tool", toolName: event.toolName };
+                accumulatedToolCalls.push({ toolName: event.toolName, toolParams: event.toolParams, toolResult: syntheticResult, executedAt: Date.now() });
+                pendingToolCallsThisPass.push({ toolName: event.toolName, toolParams: event.toolParams, toolCallId: event.toolCallId || `tc_${toolCallCount}`, toolResult: syntheticResult });
+                continue;
+              }
+              let toolResult: unknown;
+              try {
+                toolResult = await ctx.runMutation(
+                  internal.tools.executor.executeFateTool,
+                  {
+                    toolName: event.toolName,
+                    toolParams: event.toolParams,
+                    context: {
+                      campaignId: args.campaignId,
+                      messageId: gmMessageId,
+                      sceneId: (activeScene?._id ?? "") as Id<"scenes">,
+                    },
+                  }
+                );
+              } catch (err) {
+                console.warn("[G-113] Tool execution failed for", event.toolName, ":", err);
+                toolResult = { error: "invalid_params", toolName: event.toolName };
+              }
               accumulatedToolCalls.push({
                 toolName: event.toolName,
                 toolParams: event.toolParams,

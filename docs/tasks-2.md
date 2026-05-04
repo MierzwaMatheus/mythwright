@@ -180,10 +180,10 @@ OpenAI/OpenRouter tool calling exige um padrão específico: após executar a to
 
 Modelos open-source podem emitir tool calls com argumentos JSON inválidos ou nomes de tool inexistentes. Hoje em `processTurnFull.ts:51-53` há `try { params = JSON.parse(...) } catch {}` que silencia o erro.
 
-- [ ] Quando `toolName` não existe em `FATE_TOOLS`: registrar warning, **não** executar, continuar stream (não abortar turno)
-- [ ] Quando `toolParams` JSON falha: tentar fallback simples (`{}`) e logar; se tool exige campos obrigatórios, retornar erro estruturado como `toolResult: { error: "invalid_params" }` para o LLM saber
-- [ ] Testar que tool desconhecida não quebra o turno
-- [ ] Testar que tool com params inválidos retorna erro estruturado e turno completa
+- [x] Quando `toolName` não existe em `FATE_TOOLS`: registrar warning, **não** executar, continuar stream (não abortar turno)
+- [x] Quando `toolParams` JSON falha: tentar fallback simples (`{}`) e logar; se tool exige campos obrigatórios, retornar erro estruturado como `toolResult: { error: "invalid_params" }` para o LLM saber
+- [x] Testar que tool desconhecida não quebra o turno
+- [x] Testar que tool com params inválidos retorna erro estruturado e turno completa
 
 ---
 
