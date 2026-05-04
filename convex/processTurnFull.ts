@@ -13,6 +13,7 @@ const MAX_REGENERATIONS = 2;
 const FLUSH_CHAR_THRESHOLD = 200;
 const FLUSH_MS_THRESHOLD = 100;
 const SUMMARY_THRESHOLD = 20;
+const MAX_TOOL_CALLS_PER_TURN = 10;
 
 type ToolCallRecord = {
   toolName: string;
@@ -296,6 +297,7 @@ export const processTurnFull = internalAction({
       let fullText = "";
       let lastFlushAt = Date.now();
       const accumulatedToolCalls: ToolCallRecord[] = [];
+      let toolCallCount = 0;
 
       for await (const event of parseStreamingResponse(streamBody)) {
         if (event.type === "text_delta") {
@@ -314,6 +316,14 @@ export const processTurnFull = internalAction({
             lastFlushAt = Date.now();
           }
         } else if (event.type === "tool_call") {
+          toolCallCount += 1;
+          if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
+            await ctx.runMutation(internal.processTurn.markMessageStatus, {
+              messageId: gmMessageId,
+              status: "failed",
+            });
+            return { success: false, reason: "tool_call_limit_exceeded" };
+          }
           if (pendingBuffer.length > 0) {
             await ctx.runMutation(api.messages.appendMessageTokens, {
               messageId: gmMessageId,

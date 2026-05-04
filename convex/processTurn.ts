@@ -7,6 +7,7 @@ const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2; // 3 tentativas no total (0, 1, 2)
 const FLUSH_CHAR_THRESHOLD = 200;
 const FLUSH_MS_THRESHOLD = 100;
+const MAX_TOOL_CALLS_PER_TURN = 10;
 
 type ToolCallRecord = {
   toolName: string;
@@ -138,6 +139,7 @@ export const processTurn = internalAction({
       let fullText = "";
       let lastFlushAt = Date.now();
       const accumulatedToolCalls: ToolCallRecord[] = [];
+      let toolCallCount = 0;
 
       // Obter cena ativa para o contexto das tools
       const activeScene = await ctx.runQuery(internal.scenes.getActiveSceneInternal, { campaignId: args.campaignId });
@@ -159,6 +161,14 @@ export const processTurn = internalAction({
             lastFlushAt = Date.now();
           }
         } else if (event.type === "tool_call") {
+          toolCallCount += 1;
+          if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
+            await ctx.runMutation(internal.processTurn.markMessageStatus, {
+              messageId: gmMessageId,
+              status: "failed",
+            });
+            return { success: false, reason: "tool_call_limit_exceeded" };
+          }
           // Flush texto pendente antes de executar a tool
           if (pendingBuffer.length > 0) {
             await ctx.runMutation(api.messages.appendMessageTokens, {

@@ -156,10 +156,10 @@ A task original pedia "remover ou restringir a admin a query `users.list`". Conf
 
 O loop em `processTurnFull` itera enquanto o stream produz `tool_call` events. Sem limite, um modelo confuso pode entrar em loop infinito de tools chamando tools — risco de custo descontrolado.
 
-- [ ] Adicionar contador `toolCallCount` no loop principal de `processTurnFull`
-- [ ] Definir constante `MAX_TOOL_CALLS_PER_TURN = 10` no topo do arquivo
-- [ ] Quando `toolCallCount > MAX_TOOL_CALLS_PER_TURN`: abortar geração, marcar mensagem como `failed`, retornar `{ success: false, reason: "tool_call_limit_exceeded" }`
-- [ ] Testar com mock de stream que emite 11 tool calls — verificar abort no 11º
+- [x] Adicionar contador `toolCallCount` no loop principal de `processTurnFull`
+- [x] Definir constante `MAX_TOOL_CALLS_PER_TURN = 10` no topo do arquivo
+- [x] Quando `toolCallCount > MAX_TOOL_CALLS_PER_TURN`: abortar geração, marcar mensagem como `failed`, retornar `{ success: false, reason: "tool_call_limit_exceeded" }`
+- [x] Testar com mock de stream que emite 11 tool calls — verificar abort no 11º
 
 ### Re-prompt Após Tool Call — G-112
 
