@@ -156,10 +156,10 @@ A task original pedia "remover ou restringir a admin a query `users.list`". Conf
 
 O loop em `processTurnFull` itera enquanto o stream produz `tool_call` events. Sem limite, um modelo confuso pode entrar em loop infinito de tools chamando tools — risco de custo descontrolado.
 
-- [ ] Adicionar contador `toolCallCount` no loop principal de `processTurnFull`
-- [ ] Definir constante `MAX_TOOL_CALLS_PER_TURN = 10` no topo do arquivo
-- [ ] Quando `toolCallCount > MAX_TOOL_CALLS_PER_TURN`: abortar geração, marcar mensagem como `failed`, retornar `{ success: false, reason: "tool_call_limit_exceeded" }`
-- [ ] Testar com mock de stream que emite 11 tool calls — verificar abort no 11º
+- [x] Adicionar contador `toolCallCount` no loop principal de `processTurnFull`
+- [x] Definir constante `MAX_TOOL_CALLS_PER_TURN = 10` no topo do arquivo
+- [x] Quando `toolCallCount > MAX_TOOL_CALLS_PER_TURN`: abortar geração, marcar mensagem como `failed`, retornar `{ success: false, reason: "tool_call_limit_exceeded" }`
+- [x] Testar com mock de stream que emite 11 tool calls — verificar abort no 11º
 
 ### Re-prompt Após Tool Call — G-112
 
@@ -167,12 +167,12 @@ O loop em `processTurnFull` itera enquanto o stream produz `tool_call` events. S
 
 OpenAI/OpenRouter tool calling exige um padrão específico: após executar a tool, reenviar todo o histórico ao LLM **incluindo** a mensagem `assistant` com `tool_calls` e a mensagem `tool` com `content` do resultado, então o LLM continua a narrativa. O loop atual em `processTurnFull` apenas registra a tool call mas não reenvia ao LLM o resultado para que ele continue a narrativa após a tool. Verificar se esse fluxo está correto.
 
-- [ ] Auditar `processTurnFull.ts:176-249`: confirmar se há um segundo `callLlm` com histórico atualizado após tool execution, ou se o stream original continua naturalmente após o tool_call delta
-- [ ] Se faltar: implementar continuação — após executar tool e ter `toolResult`, fazer `callLlm` adicional com:
+- [x] Auditar `processTurnFull.ts:176-249`: confirmar se há um segundo `callLlm` com histórico atualizado após tool execution, ou se o stream original continua naturalmente após o tool_call delta
+- [x] Se faltar: implementar continuação — após executar tool e ter `toolResult`, fazer `callLlm` adicional com:
   ```
   [...llmMessages, { role: "assistant", tool_calls: [...] }, { role: "tool", tool_call_id, content: JSON.stringify(toolResult) }]
   ```
-- [ ] Testar fluxo: GM rola dado → tool executa → GM continua narrativa descrevendo o resultado
+- [x] Testar fluxo: GM rola dado → tool executa → GM continua narrativa descrevendo o resultado
 
 ### Tool Call Mal-formado — G-113
 
@@ -180,10 +180,10 @@ OpenAI/OpenRouter tool calling exige um padrão específico: após executar a to
 
 Modelos open-source podem emitir tool calls com argumentos JSON inválidos ou nomes de tool inexistentes. Hoje em `processTurnFull.ts:51-53` há `try { params = JSON.parse(...) } catch {}` que silencia o erro.
 
-- [ ] Quando `toolName` não existe em `FATE_TOOLS`: registrar warning, **não** executar, continuar stream (não abortar turno)
-- [ ] Quando `toolParams` JSON falha: tentar fallback simples (`{}`) e logar; se tool exige campos obrigatórios, retornar erro estruturado como `toolResult: { error: "invalid_params" }` para o LLM saber
-- [ ] Testar que tool desconhecida não quebra o turno
-- [ ] Testar que tool com params inválidos retorna erro estruturado e turno completa
+- [x] Quando `toolName` não existe em `FATE_TOOLS`: registrar warning, **não** executar, continuar stream (não abortar turno)
+- [x] Quando `toolParams` JSON falha: tentar fallback simples (`{}`) e logar; se tool exige campos obrigatórios, retornar erro estruturado como `toolResult: { error: "invalid_params" }` para o LLM saber
+- [x] Testar que tool desconhecida não quebra o turno
+- [x] Testar que tool com params inválidos retorna erro estruturado e turno completa
 
 ---
 

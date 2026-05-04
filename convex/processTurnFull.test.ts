@@ -89,6 +89,34 @@ function makeEmbeddingResponse() {
   };
 }
 
+// Helper para criar SSE stream com um tool call
+function makeToolCallSseStream(
+  toolName: string,
+  params: unknown,
+  toolCallId: string
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const delta = {
+    tool_calls: [
+      {
+        id: toolCallId,
+        function: { name: toolName, arguments: JSON.stringify(params) },
+      },
+    ],
+  };
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`
+        )
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
+
 // Helper para criar SSE stream a partir de chunks de texto
 function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -903,5 +931,409 @@ describe("processTurnFull (G-105 — paralelismo estágios 5 e 6)", () => {
     expect(result).toMatchObject({ success: true });
     expect(callOrder).not.toContain("antiLeak");
     expect(callOrder).toContain("factExtraction");
+  });
+});
+
+describe("processTurnFull (G-112 — re-prompt após tool call)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("G-112: GM chama tool → resultado reenviado ao LLM → GM continua narrativa descrevendo o resultado", async () => {
+    const t = convexTest(schema, modules);
+
+    const { campaignId, playerMessageId, characterId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g112@test.com",
+        displayName: "G112 Tester",
+        tokenIdentifier: "token|g112-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G112 Campaign",
+        premise: "Teste de re-prompt após tool call.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const characterId = await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena G-112",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Uso um ponto de destino!",
+        clientMessageId: "g112-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId, characterId };
+    });
+
+    const capturedLlmMessages: any[][] = [];
+    let streamCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          capturedLlmMessages.push(body.messages ?? []);
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite um tool call
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "award_fate_point",
+                { characterId, reason: "teste G-112" },
+                "tc_g112_1"
+              ),
+            };
+          }
+          // 2ª passagem: LLM continua a narrativa com o resultado da tool
+          return { ok: true, body: makeSseStream(["O herói ganha um Ponto de Destino!"]) };
+        }
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+    });
+
+    expect(result).toMatchObject({ success: true });
+
+    // LLM deve ter sido chamado 2 vezes: 1ª para tool call, 2ª para continuação
+    expect(streamCallCount).toBe(2);
+
+    // 2ª chamada deve incluir mensagem assistant com tool_calls e mensagem tool com resultado
+    const secondCallMsgs = capturedLlmMessages[1];
+    const assistantMsg = secondCallMsgs.find(
+      (m: any) => m.role === "assistant" && Array.isArray(m.tool_calls)
+    );
+    const toolMsg = secondCallMsgs.find((m: any) => m.role === "tool");
+
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.tool_calls[0].function.name).toBe("award_fate_point");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.tool_call_id).toBe("tc_g112_1");
+
+    // Mensagem GM deve conter o texto de continuação
+    const gmMessage = await t.run(async (ctx) => {
+      const msgs = await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
+      return msgs;
+    });
+    expect(gmMessage?.content).toContain("O herói ganha um Ponto de Destino!");
+  });
+});
+
+describe("processTurnFull (G-113 — tool call mal-formado)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("G-113-1: tool desconhecida não quebra o turno — status 'complete' e texto narrativo preservado", async () => {
+    const t = convexTest(schema, modules);
+
+    const { campaignId, playerMessageId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g113a@test.com",
+        displayName: "G113A Tester",
+        tokenIdentifier: "token|g113a-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G113A Campaign",
+        premise: "Teste de tool desconhecida.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena G-113A",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Faço algo especial!",
+        clientMessageId: "g113a-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+
+    let streamCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite tool call com nome desconhecido
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "nonexistent_tool",
+                { foo: "bar" },
+                "tc_unknown"
+              ),
+            };
+          }
+          // 2ª passagem: LLM continua narrativa após receber resultado sintético
+          return { ok: true, body: makeSseStream(["Narrativa continua normalmente."]) };
+        }
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: false,
+    });
+
+    // Turno deve completar com sucesso, não falhar
+    expect(result).toMatchObject({ success: true });
+
+    // Mensagem GM deve ter status "complete" e conter texto narrativo
+    const gmMessage = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
+    });
+    expect(gmMessage?.status).toBe("complete");
+    expect(gmMessage?.content).toContain("Narrativa continua normalmente.");
+
+    // toolCalls deve conter o resultado sintético { error: "unknown_tool" }
+    expect(gmMessage?.toolCalls).toBeDefined();
+    const toolCalls = gmMessage?.toolCalls as Array<{ toolName: string; toolResult: unknown }>;
+    const unknownToolCall = toolCalls.find((tc) => tc.toolName === "nonexistent_tool");
+    expect(unknownToolCall).toBeDefined();
+    expect((unknownToolCall?.toolResult as any)?.error).toBe("unknown_tool");
+  });
+
+  it("G-113-2: falha na execução da tool retorna erro estruturado e turno completa normalmente", async () => {
+    const t = convexTest(schema, modules);
+
+    const { campaignId, playerMessageId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g113b@test.com",
+        displayName: "G113B Tester",
+        tokenIdentifier: "token|g113b-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G113B Campaign",
+        premise: "Teste de params inválidos.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena G-113B",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Rolo os dados!",
+        clientMessageId: "g113b-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+
+    let streamCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite roll_fate_dice com params inválidos (campos obrigatórios ausentes)
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "roll_fate_dice",
+                {}, // params inválidos — campos obrigatórios ausentes
+                "tc_bad_params"
+              ),
+            };
+          }
+          // 2ª passagem: LLM recebe { error: "invalid_params" } e continua narrativa
+          return { ok: true, body: makeSseStream(["A rolagem falhou, mas a narrativa segue."]) };
+        }
+        // Simular falha no executor quando chamado via mutation (não-stream)
+        // O executor é chamado via ctx.runMutation internamente — mas no teste o fetch é apenas para LLM/HTTP
+        // A falha será simulada pelo executor real que vai rejeitar params {} para roll_fate_dice
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: false,
+    });
+
+    // Turno deve completar com sucesso mesmo com falha na execução da tool
+    expect(result).toMatchObject({ success: true });
+
+    // Mensagem GM deve ter status "complete"
+    const gmMessage = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
+    });
+    expect(gmMessage?.status).toBe("complete");
+
+    // toolCalls deve conter resultado com { error: "invalid_params" }
+    expect(gmMessage?.toolCalls).toBeDefined();
+    const toolCalls = gmMessage?.toolCalls as Array<{ toolName: string; toolResult: unknown }>;
+    const failedToolCall = toolCalls.find((tc) => tc.toolName === "roll_fate_dice");
+    expect(failedToolCall).toBeDefined();
+    expect((failedToolCall?.toolResult as any)?.error).toBe("invalid_params");
   });
 });

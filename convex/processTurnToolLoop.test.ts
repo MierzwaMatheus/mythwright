@@ -280,6 +280,61 @@ describe("processTurn — loop de tool calling (G-003)", () => {
     expect(compel!.characterId).toEqual(characterId);
   });
 
+  it("TC6: 11 tool_calls no mesmo stream → aborta no 11º com tool_call_limit_exceeded, mensagem failed, apenas 10 executadas", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, characterId } = await setupFull(t);
+
+    // Gerar 11 award_fate_point tool calls consecutivos
+    const toolCallChunks = Array.from({ length: 11 }, (_, i) =>
+      makeSseToolCallChunk(
+        "award_fate_point",
+        { characterId, reason: `PD ${i + 1}` },
+        `call-limit-${i + 1}`
+      )
+    );
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
+      if (url.includes("openrouter")) {
+        return {
+          ok: true,
+          body: makeSseStream([
+            ...toolCallChunks,
+            makeSseDone(),
+          ]),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: JSON.stringify({ vazou: false, fatos: [] }) } }] }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurn.processTurn, {
+      campaignId,
+      hiddenFacts: [],
+      playerMessageContent: "Faço muitas coisas!",
+      antiLeakValidationEnabled: false,
+    });
+
+    // 1. Retorno deve indicar falha por limite
+    expect(result).toMatchObject({ success: false, reason: "tool_call_limit_exceeded" });
+    const r = result as { success: false; reason: string; messageId?: string };
+
+    // 2. Mensagem GM deve ter status "failed"
+    // Buscar a mensagem GM criada durante o turno
+    const gmMsg = await t.run(async (ctx) => {
+      const msgs = await ctx.db.query("messages").collect();
+      return msgs.find((m: any) => m.role === "gm");
+    }) as any;
+    expect(gmMsg).not.toBeNull();
+    expect(gmMsg!.status).toBe("failed");
+
+    // 3. Apenas 10 tool calls executadas (não a 11ª)
+    // Cada award_fate_point incrementa fatePoints em 1; começou em 3
+    const char = await t.run(async (ctx) => ctx.db.get(characterId)) as any;
+    expect(char!.fatePoints).toBe(13); // 3 inicial + 10 executadas
+  });
+
   it("TC5: múltiplas tool_calls no mesmo stream → todas executadas em sequência", async () => {
     const t = convexTest(schema, modules);
     const { campaignId, characterId, sceneId } = await setupFull(t);
