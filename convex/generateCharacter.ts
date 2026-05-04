@@ -51,6 +51,7 @@ export const generateCharacter = internalAction({
   args: {
     campaignId: v.id("campaigns"),
     characterPremise: v.string(),
+    apiKey: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"characters">> => {
     const campaign = await ctx.runQuery(internal.generateCharacter._getCampaign, {
@@ -69,7 +70,7 @@ export const generateCharacter = internalAction({
       campaignTone: campaign.tone,
     });
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {

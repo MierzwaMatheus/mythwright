@@ -19,6 +19,7 @@ export const classifyTriggers = internalAction({
         scope: v.string(),
       }),
     ),
+    apiKey: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -36,7 +37,7 @@ export const classifyTriggers = internalAction({
       candidates,
     );
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
     const response = await fetch(
       "https://openrouter.ai/api/v1/chat/completions",
       {

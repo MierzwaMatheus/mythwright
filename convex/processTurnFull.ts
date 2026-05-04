@@ -3,6 +3,10 @@ import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { buildGmSystemPrompt } from "./prompts/gmSystemPrompt";
+import { buildFullContext } from "./lib/contextBuilder";
+import { retrieveSemanticContext } from "./lib/semanticMemory";
+import { vectorSearch } from "./lib/vectorSearch";
+import { resolveOpenRouterKey, OpenRouterKeyMissingError } from "./lib/llmAuth";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -68,6 +72,7 @@ async function* parseStreamingResponse(
 async function callLlm(
   messages: Array<{ role: string; content: string }>,
   model: string,
+  apiKey: string,
   tools?: unknown[]
 ): Promise<ReadableStream<Uint8Array>> {
   const body: Record<string, unknown> = {
@@ -82,7 +87,7 @@ async function callLlm(
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -137,6 +142,20 @@ export const processTurnFull = internalAction({
       return { success: false, reason: "campaign_not_found" };
     }
 
+    // --- BYOK: resolver chave OpenRouter antes de qualquer chamada LLM ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
+    }
+
     const llmConfig = await ctx.runQuery(
       internal.lib.llmConfig.getLlmConfigInternal,
       { campaignId: args.campaignId }
@@ -146,6 +165,117 @@ export const processTurnFull = internalAction({
       tone: campaign.tone,
       premise: campaign.premise,
     });
+
+    // --- ESTÁGIO 2: montagem do contexto semântico ---
+    const queryEmbedding = await ctx.runAction(
+      internal.lib.embedding.generateEmbedding,
+      { text: playerMessage.content }
+    );
+
+    const [semanticCtx, character, recentMessages, sceneAspects] = await Promise.all([
+      retrieveSemanticContext(ctx, { campaignId: args.campaignId, queryEmbedding }),
+      ctx.runQuery(internal.characters.getByCampaignIdInternal, { campaignId: args.campaignId }),
+      activeScene
+        ? ctx.runQuery(internal.messages.getRecentBySceneInternal, { sceneId: activeScene._id, limit: 10 })
+        : Promise.resolve([]),
+      activeScene
+        ? ctx.runQuery(internal.sceneAspects.getBySceneInternal, { sceneId: activeScene._id })
+        : Promise.resolve([]),
+    ]);
+
+    const campaignForContext = { name: campaign.name, systemPrompt };
+    const sceneForContext = activeScene
+      ? { title: activeScene.title, description: activeScene.description, status: activeScene.status }
+      : { title: "Sem cena ativa", status: "inactive" as const };
+    const messagesForContext = [...recentMessages].reverse().map((m) => ({
+      role: m.role === "gm" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+      status: m.status === "failed" ? ("failed" as const) : ("ok" as const),
+    }));
+    messagesForContext.push({ role: "user" as const, content: playerMessage.content, status: "ok" as const });
+
+    const characterForContext = character ?? {
+      name: "Desconhecido",
+      aspects: [],
+      skills: {},
+      stunts: [],
+      fatePoints: 3,
+      stress: { physical: [false, false, false], mental: [false, false, false] },
+      consequences: [],
+    };
+
+    const aspectEvents = sceneAspects.map((a) => ({ name: a.text, description: `${a.freeInvokes} invocações livres` }));
+
+    // --- ESTÁGIO 3: classificação e disparo de triggers ---
+    const triggersFired: Id<"triggers">[] = [];
+    const factsRevealedFromTriggers: Id<"facts">[] = [];
+    const triggeredEventDescriptions: Array<{ name: string; description: string }> = [];
+
+    const armedTriggers = await ctx.runQuery(api.triggers.getArmedTriggersByScope, {
+      campaignId: args.campaignId,
+      sceneId: activeScene?._id,
+    });
+
+    if (armedTriggers.length > 0) {
+      const triggerSearchResults = await vectorSearch(
+        ctx,
+        "triggers",
+        "by_embedding",
+        queryEmbedding,
+        { campaignId: args.campaignId },
+        armedTriggers.length * 2,
+      );
+
+      const armedIdSet = new Set(armedTriggers.map((t) => t._id as string));
+      const ranked = triggerSearchResults.filter((r) => armedIdSet.has(r._id));
+
+      // Fallback para pré-filtro quando nenhum trigger tem embedding ainda
+      const topK = ranked.length > 0 ? ranked.slice(0, 5) : armedTriggers.slice(0, 5).map((t) => ({ _id: t._id as string, _score: 1 }));
+
+      const candidates = topK.map((r) => {
+        const trigger = armedTriggers.find((t) => (t._id as string) === r._id)!;
+        return { id: r._id, description: trigger.description, scope: trigger.scope };
+      });
+
+      if (candidates.length > 0) {
+        const sceneSummary = activeScene
+          ? `${activeScene.title}: ${activeScene.description ?? ""}`
+          : "";
+
+        const classified = await ctx.runAction(internal.classifyTriggers.classifyTriggers, {
+          campaignId: args.campaignId,
+          playerMessage: playerMessage.content,
+          sceneSummary,
+          candidates,
+          apiKey: openRouterApiKey,
+        });
+
+        for (const triggerId of classified.activatedIds) {
+          const result = await ctx.runMutation(internal.triggers.fireTrigger, {
+            triggerId: triggerId as Id<"triggers">,
+            firedByMessageId: args.playerMessageId,
+          });
+          triggersFired.push(triggerId as Id<"triggers">);
+          factsRevealedFromTriggers.push(...result.revealedFactIds);
+          const trigger = armedTriggers.find((t) => (t._id as string) === triggerId);
+          if (trigger) {
+            triggeredEventDescriptions.push({ name: trigger.description, description: "trigger disparado" });
+          }
+        }
+      }
+    }
+
+    const firedEvents = [...aspectEvents, ...triggeredEventDescriptions];
+
+    const llmMessages = buildFullContext(
+      campaignForContext,
+      characterForContext,
+      sceneForContext,
+      messagesForContext,
+      semanticCtx.facts,
+      semanticCtx.summaries,
+      firedEvents,
+    );
 
     // --- LOOP DE REGENERAÇÃO ---
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
@@ -159,14 +289,8 @@ export const processTurnFull = internalAction({
         }
       );
 
-      // Montar mensagens para LLM
-      const llmMessages: Array<{ role: string; content: string }> = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: playerMessage.content },
-      ];
-
       // Streaming
-      const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
+      const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
 
       let pendingBuffer = "";
       let fullText = "";
@@ -267,29 +391,11 @@ export const processTurnFull = internalAction({
       // AntiLeak
       const antiLeakEnabled = args.antiLeakValidationEnabled !== false;
       if (!antiLeakEnabled) {
-        await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
-          gmMessageId,
-          triggersFired: [],
-          factsRevealed: [],
-        });
-        return { success: true, messageId: gmMessageId };
-      }
-
-      const leakResult = await ctx.runAction(
-        internal.prompts.antiLeak.validateAntiLeak,
-        {
-          messageId: gmMessageId,
-          campaignId: args.campaignId,
-          hiddenFacts: [],
-        }
-      );
-
-      if (!leakResult.vazou) {
-        // Estágio 6: extrair fatos
         try {
           await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
             messageId: gmMessageId,
             campaignId: args.campaignId,
+            apiKey: openRouterApiKey,
           });
         } catch {
           await ctx.runMutation(internal.processTurn.markMessageStatus, {
@@ -298,13 +404,68 @@ export const processTurnFull = internalAction({
           });
           return { success: false, reason: "fact_extraction_failed" };
         }
+        await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+          gmMessageId,
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
+        });
+        return { success: true, messageId: gmMessageId };
+      }
+
+      // --- ESTÁGIO 5: recuperar hidden facts relevantes para anti-leak ---
+      const gmEmbedding = await ctx.runAction(internal.lib.embedding.generateEmbedding, {
+        text: fullText,
+      });
+      const hiddenFactSearchResults = await vectorSearch(
+        ctx,
+        "facts",
+        "by_embedding",
+        gmEmbedding,
+        { campaignId: args.campaignId },
+        30,
+      );
+      const hiddenFactDocs = await Promise.all(
+        hiddenFactSearchResults.slice(0, 10).map((r) =>
+          ctx.runQuery(internal.facts.getByIdInternal, { factId: r._id as Id<"facts"> })
+        )
+      );
+      const hiddenFacts = hiddenFactDocs
+        .filter((d): d is NonNullable<typeof d> => d !== null && d.visibility === "hidden")
+        .map((d) => ({ id: d._id as string, content: d.content }));
+
+      // --- ESTÁGIOS 5 e 6 em paralelo ---
+      const [leakResult, factExtractionError] = await Promise.all([
+        ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
+          messageId: gmMessageId,
+          campaignId: args.campaignId,
+          hiddenFacts,
+          apiKey: openRouterApiKey,
+        }),
+        ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+          messageId: gmMessageId,
+          campaignId: args.campaignId,
+          apiKey: openRouterApiKey,
+        }).then(() => null).catch((e: unknown) => e),
+      ]);
+
+      if (factExtractionError !== null && !leakResult.vazou) {
+        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+          messageId: gmMessageId,
+          status: "failed",
+        });
+        return { success: false, reason: "fact_extraction_failed" };
+      }
+
+      if (!leakResult.vazou) {
 
         // Estágio 7: housekeeping
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
           gmMessageId,
-          triggersFired: [],
-          factsRevealed: [],
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
         });
+
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId: gmMessageId, content: fullText });
 
         // Estágio 8: threshold de resumo
         if (activeScene) {
@@ -315,6 +476,7 @@ export const processTurnFull = internalAction({
           if (msgCount >= SUMMARY_THRESHOLD) {
             await ctx.scheduler.runAfter(0, internal.summarizeScene.summarizeScene, {
               sceneId: activeScene._id,
+              apiKey: openRouterApiKey,
             });
           }
         }
@@ -397,6 +559,20 @@ export const continueAfterCompel = internalAction({
     if (!playerMessage) return { success: false, reason: "player_message_not_found" };
     if (!campaign) return { success: false, reason: "campaign_not_found" };
 
+    // --- BYOK: resolver chave OpenRouter ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
+    }
+
     const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
       campaignId: compel.campaignId,
     });
@@ -416,7 +592,7 @@ export const continueAfterCompel = internalAction({
     ];
 
     // 5. Streaming
-    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
+    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
     let pendingBuffer = "";
     let fullText = "";
     let lastFlushAt = Date.now();
@@ -465,6 +641,7 @@ export const continueAfterCompel = internalAction({
       messageId: args.gmMessageId,
       campaignId: compel.campaignId,
       hiddenFacts: [],
+      apiKey: openRouterApiKey,
     });
 
     if (!leakResult.vazou) {
@@ -472,6 +649,7 @@ export const continueAfterCompel = internalAction({
         await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
           messageId: args.gmMessageId,
           campaignId: compel.campaignId,
+          apiKey: openRouterApiKey,
         });
       } catch {
         await ctx.runMutation(internal.processTurn.markMessageStatus, {

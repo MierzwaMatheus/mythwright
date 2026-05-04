@@ -15,11 +15,11 @@ Pré-condição: `tasks.md` (parte 1) totalmente concluído. As tasks abaixo cob
 
 `convex/messages.ts` já expõe `setEmbeddingInternal`, mas **nenhum caller agenda o embedding da mensagem do jogador** após sua criação. Sem isso, o vectorIndex de `messages` permanece vazio e a busca semântica de turnos passados não funciona.
 
-- [ ] Criar `internalAction embedMessage(messageId)` em `convex/lib/embedding.ts` que lê o conteúdo da mensagem, chama `generateEmbedding`, e persiste via `messages.setEmbeddingInternal`
-- [ ] Em `convex/messages.ts:createMessage`, agendar `ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId })` após inserção bem-sucedida (apenas para `role === "player"` — mensagens do GM são embedadas no Estágio 7)
-- [ ] No fim do Estágio 7 do `processTurnFull`, agendar `embedMessage` para a mensagem GM finalizada
-- [ ] Testar que `createMessage` agenda embedding para mensagem do player
-- [ ] Testar que `processTurnFull` finaliza com embedding da resposta do GM persistido
+- [x] Criar `internalAction embedMessage(messageId)` em `convex/lib/embedding.ts` que lê o conteúdo da mensagem, chama `generateEmbedding`, e persiste via `messages.setEmbeddingInternal`
+- [x] Em `convex/messages.ts:createMessage`, agendar `ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId })` após inserção bem-sucedida (apenas para `role === "player"` — mensagens do GM são embedadas no Estágio 7)
+- [x] No fim do Estágio 7 do `processTurnFull`, agendar `embedMessage` para a mensagem GM finalizada
+- [x] Testar que `createMessage` agenda embedding para mensagem do player
+- [x] Testar que `processTurnFull` finaliza com embedding da resposta do GM persistido
 
 ### Recuperação Semântica em `buildFullContext` — G-102
 
@@ -27,19 +27,19 @@ Pré-condição: `tasks.md` (parte 1) totalmente concluído. As tasks abaixo cob
 
 Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem histórico, sem ficha, sem fatos recuperados, sem cena. A função `buildFullContext` existe e é testada, mas **nunca é chamada**. As tabelas `entities`, `facts`, `summaries` têm vectorIndex prontos mas nenhum caller os consulta.
 
-- [ ] Criar helper `lib/semanticMemory.ts` com `retrieveSemanticContext(ctx, { campaignId, sceneId, queryEmbedding, limits })` que executa em paralelo:
+- [x] Criar helper `lib/semanticMemory.ts` com `retrieveSemanticContext(ctx, { campaignId, sceneId, queryEmbedding, limits })` que executa em paralelo:
   - `vectorSearch` em `facts` filtrando `visibility ∈ {known, rumored}` (top-K conforme PRD; default 5)
   - `vectorSearch` em `entities` filtrando `visibility ∈ {known, rumored}` (top-K; default 5)
   - `vectorSearch` em `summaries` filtrando `level ∈ {scene, arc}` (top-K; default 3)
-- [ ] No Estágio 2 do `processTurnFull`:
+- [x] No Estágio 2 do `processTurnFull`:
   - Aguardar embedding da mensagem do jogador (chamar `generateEmbedding` síncrono — não esperar scheduler)
   - Chamar `retrieveSemanticContext` com esse embedding
   - Buscar `character` ativo da campanha
   - Buscar últimas N mensagens da cena (janela curta — usar `messages.getMessagesByScene`)
   - Buscar `sceneAspects` da cena ativa
   - Chamar `buildFullContext` com tudo isso e usar como `messages` enviadas ao LLM (em vez de só system + user crus)
-- [ ] Testar `retrieveSemanticContext` com mock de embedding e dados seeds
-- [ ] Testar que `processTurnFull` envia ao LLM um array de mensagens com histórico e contexto semântico (verificar payload com mock)
+- [x] Testar `retrieveSemanticContext` com mock de embedding e dados seeds
+- [x] Testar que `processTurnFull` envia ao LLM um array de mensagens com histórico e contexto semântico (verificar payload com mock)
 
 ### Integração de Gatilhos no Loop — G-103
 
@@ -47,16 +47,16 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 `classifyTriggers` foi implementado e testado isoladamente. **Não é chamado pelo `processTurnFull`.** A pipeline completa de 3 fases (pré-filtro → vectorSearch → LLM classifier) precisa rodar antes do Estágio 4.
 
-- [ ] No Estágio 3 do `processTurnFull`, antes da chamada ao LLM narrativo:
+- [x] No Estágio 3 do `processTurnFull`, antes da chamada ao LLM narrativo:
   - Chamar `triggers.getArmedTriggersByScope` para obter candidatos pré-filtrados (cena ativa + globais)
   - Aplicar `vectorSearch` em `triggers` usando o embedding da mensagem do jogador, filtrando `status = "armed"` e `scope` relevante; combinar resultado com pré-filtro (top-K por similaridade)
   - Chamar `internal.classifyTriggers.classifyTriggers` com a mensagem do jogador e os candidatos
   - Para cada trigger ativado: chamar `triggers.resolveTriggerEffects` (executa efeitos) e adicionar `triggerId` em `triggersFired`
   - Passar resumo dos eventos disparados para `buildFullContext` (já tem o parâmetro `triggeredEvents`) para que o GM tenha consciência do que mudou
-- [ ] Persistir `triggersFired` na mensagem GM no Estágio 7
-- [ ] Testar que mensagem do jogador → trigger relevante ativa → efeito é executado antes da resposta do GM
-- [ ] Testar que trigger `oneShot: true` muda status para `fired` e não dispara novamente
-- [ ] Testar que trigger `oneShot: false` permanece `armed` após disparar
+- [x] Persistir `triggersFired` na mensagem GM no Estágio 7
+- [x] Testar que mensagem do jogador → trigger relevante ativa → efeito é executado antes da resposta do GM
+- [x] Testar que trigger `oneShot: true` muda status para `fired` e não dispara novamente
+- [x] Testar que trigger `oneShot: false` permanece `armed` após disparar
 
 ### Anti-leak com Hidden Facts Recuperados — G-104
 
@@ -64,11 +64,11 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 `processTurnFull.ts:283` chama `validateAntiLeak` com `hiddenFacts: []` hard-coded. Sem hidden facts no input, a validação não tem base para detectar vazamento real.
 
-- [ ] No Estágio 5 do `processTurnFull`, antes de chamar `validateAntiLeak`:
+- [x] No Estágio 5 do `processTurnFull`, antes de chamar `validateAntiLeak`:
   - Executar `vectorSearch` em `facts` filtrando `visibility = "hidden"`, usando o embedding da mensagem GM gerada (top-K; default 10)
   - Passar essa lista para `validateAntiLeak`
-- [ ] Testar que `validateAntiLeak` recebe hidden facts relevantes (mock de vectorSearch)
-- [ ] Testar regeneração: hidden fact aparece na resposta → validateAntiLeak detecta → regenera
+- [x] Testar que `validateAntiLeak` recebe hidden facts relevantes (mock de vectorSearch)
+- [x] Testar regeneração: hidden fact aparece na resposta → validateAntiLeak detecta → regenera
 
 ### Paralelismo de Estágios 5 e 6 — G-105
 
@@ -76,10 +76,10 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 Hoje no `processTurnFull.ts:278-300`, o anti-leak roda primeiro e só depois o `extractAndPersistFacts`. PRD prevê os dois em paralelo para reduzir latência (~1-2s por turno).
 
-- [ ] Refatorar para `Promise.all([validateAntiLeak(...), extractAndPersistFacts(...)])` quando `antiLeakEnabled === true`
-- [ ] Tratar caso onde `validateAntiLeak` detecta vazamento mas `extractAndPersistFacts` já persistiu fatos: não há corrupção (fatos extraídos da mensagem vazada permanecem válidos como conhecimento do mundo)
-- [ ] Quando `antiLeakEnabled === false`, manter apenas `extractAndPersistFacts`
-- [ ] Testar que ambas as actions executam concorrentemente (verificar via timing ou mock counter)
+- [x] Refatorar para `Promise.all([validateAntiLeak(...), extractAndPersistFacts(...)])` quando `antiLeakEnabled === true`
+- [x] Tratar caso onde `validateAntiLeak` detecta vazamento mas `extractAndPersistFacts` já persistiu fatos: não há corrupção (fatos extraídos da mensagem vazada permanecem válidos como conhecimento do mundo)
+- [x] Quando `antiLeakEnabled === false`, manter apenas `extractAndPersistFacts`
+- [x] Testar que ambas as actions executam concorrentemente (verificar via timing ou mock counter)
 
 ---
 
@@ -91,12 +91,12 @@ Hoje no `processTurnFull.ts:278-300`, o anti-leak roda primeiro e só depois o `
 
 Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável global do deploy). O PRD especifica BYOK — cada usuário fornece sua chave via `users.saveOpenRouterKey`, que é criptografada. **Nenhum caller descriptografa e usa essa chave.**
 
-- [ ] Criar helper `lib/llmAuth.ts` com `internalAction getDecryptedOpenRouterKey(userId)` que lê `users.encryptedOpenRouterKey` e descriptografa via `lib/crypto.decryptValue`
-- [ ] Refatorar `processTurnFull` para receber o `userId` (ou derivar de `campaign.userId`) e usar `getDecryptedOpenRouterKey` em vez de `process.env`
-- [ ] Refatorar `classifyTriggers`, `summarizeScene`, `summarizeArc`, `generateWorld`, `generateCharacter`, `prompts/antiLeak.validateAntiLeak`, `prompts/factExtraction.extractAndPersistFacts` para receberem a chave descriptografada como parâmetro (em vez de lerem env)
-- [ ] Manter fallback para `process.env.OPENROUTER_API_KEY` apenas em dev/test (controlado por flag explícita ou ausência de chave do usuário)
-- [ ] Testar que turno com chave do usuário usa a chave correta no header `Authorization`
-- [ ] Testar que turno sem chave do usuário falha graciosamente com erro `"openrouter_key_missing"`
+- [x] Criar helper `lib/llmAuth.ts` com `internalAction getDecryptedOpenRouterKey(userId)` que lê `users.encryptedOpenRouterKey` e descriptografa via `lib/crypto.decryptValue`
+- [x] Refatorar `processTurnFull` para receber o `userId` (ou derivar de `campaign.userId`) e usar `getDecryptedOpenRouterKey` em vez de `process.env`
+- [x] Refatorar `classifyTriggers`, `summarizeScene`, `summarizeArc`, `generateWorld`, `generateCharacter`, `prompts/antiLeak.validateAntiLeak`, `prompts/factExtraction.extractAndPersistFacts` para receberem a chave descriptografada como parâmetro (em vez de lerem env)
+- [x] Manter fallback para `process.env.OPENROUTER_API_KEY` apenas em dev/test (controlado por flag explícita ou ausência de chave do usuário)
+- [x] Testar que turno com chave do usuário usa a chave correta no header `Authorization`
+- [x] Testar que turno sem chave do usuário falha graciosamente com erro `"openrouter_key_missing"`
 
 ### Provedor de Embedding Configurável — G-107
 
@@ -104,11 +104,11 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 `convex/lib/embedding.ts:11` lê `process.env.TOGETHER_API_KEY`, mas nada indica se a chamada acontece via Together, OpenRouter ou HF. Modelo é hard-coded.
 
-- [ ] Confirmar provedor: usar OpenRouter (consistência com narrativa/utility) **ou** Together AI (mais barato para embedding) — decidir e documentar em `convex/lib/embedding.ts` no topo do arquivo
-- [ ] Ler modelo de `campaign.llmConfig.embeddingModel` (default `BAAI/bge-m3`) em vez de hard-code
-- [ ] Se provedor for Together: aceitar `TOGETHER_API_KEY` como env ou (futuramente) chave por usuário
+- [x] Confirmar provedor: usar OpenRouter (consistência com narrativa/utility) **ou** Together AI (mais barato para embedding) — decidir e documentar em `convex/lib/embedding.ts` no topo do arquivo
+- [x] Ler modelo de `campaign.llmConfig.embeddingModel` (default `BAAI/bge-m3`) em vez de hard-code
+- [x] Se provedor for Together: aceitar `TOGETHER_API_KEY` como BYOK
 - [ ] Se provedor for OpenRouter: usar a mesma chave do usuário descriptografada (G-106)
-- [ ] Validar que retorno tem dimensão 1024 (compatível com `vectorIndex` do schema); falhar com erro claro se diferente
+- [x] Validar que retorno tem dimensão 1024 (compatível com `vectorIndex` do schema); falhar com erro claro se diferente
 
 ### LLM Config Resolver com Fallback — G-108
 
@@ -116,9 +116,9 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 `lib/llmConfig.ts` foi criado, mas precisa garantir que defaults open-source são sempre aplicados quando faltam campos parciais (ex: campanha tem `narrativeModel` definido mas não `utilityModel`).
 
-- [ ] Refatorar `getLlmConfig` para fazer merge profundo: `{ ...DEFAULTS, ...campaign.llmConfig }` em vez de retornar tudo-ou-nada
-- [ ] Definir `DEFAULTS` no topo do arquivo: `narrativeModel: "deepseek/deepseek-chat"`, `utilityModel: "meta-llama/llama-3.1-8b-instruct"`, `extractionModel: "qwen/qwen-2.5-32b-instruct"`, `embeddingModel: "BAAI/bge-m3"`
-- [ ] Testar que campanha com `llmConfig: { narrativeModel: "x" }` retorna `{ narrativeModel: "x", utilityModel: DEFAULTS.utilityModel, ... }`
+- [x] Refatorar `getLlmConfig` para fazer merge profundo: `{ ...DEFAULTS, ...campaign.llmConfig }` em vez de retornar tudo-ou-nada
+- [x] Definir `DEFAULTS` no topo do arquivo: `narrativeModel: "deepseek/deepseek-chat"`, `utilityModel: "meta-llama/llama-3.1-8b-instruct"`, `extractionModel: "qwen/qwen-2.5-32b-instruct"`, `embeddingModel: "BAAI/bge-m3"`
+- [x] Testar que campanha com `llmConfig: { narrativeModel: "x" }` retorna `{ narrativeModel: "x", utilityModel: DEFAULTS.utilityModel, ... }`
 
 ---
 

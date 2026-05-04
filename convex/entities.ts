@@ -1,5 +1,5 @@
 import { ConvexError, v } from "convex/values";
-import { mutation, query, internalMutation, MutationCtx } from "./_generated/server";
+import { mutation, query, internalMutation, internalQuery, MutationCtx } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
 import { Id } from "./_generated/dataModel";
 import { internal } from "./_generated/api";
@@ -70,6 +70,13 @@ export const changeEntityVisibility = mutation({
 
     await assertCampaignOwnership(ctx, entity.campaignId, user._id);
     await ctx.db.patch(args.entityId, { visibility: args.visibility });
+  },
+});
+
+export const getByIdInternal = internalQuery({
+  args: { entityId: v.id("entities") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.entityId);
   },
 });
 

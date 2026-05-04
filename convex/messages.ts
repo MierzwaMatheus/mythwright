@@ -1,6 +1,7 @@
 import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
+import { internal } from "./_generated/api";
 
 export const getMessagesByScene = query({
   args: {
@@ -35,13 +36,19 @@ export const createMessage = mutation({
       return existing._id;
     }
 
-    return await ctx.db.insert("messages", {
+    const messageId = await ctx.db.insert("messages", {
       campaignId: args.campaignId,
       role: args.role,
       content: args.content,
       clientMessageId: args.clientMessageId,
       status: "pending",
     });
+
+    if (args.role === "player") {
+      await ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId, content: args.content });
+    }
+
+    return messageId;
   },
 });
 
