@@ -262,7 +262,7 @@ Para diagnosticar problemas em produção, cada turno precisa logar eventos-chav
 
 Antes de declarar MVP backend completo, escrever um teste de integração que exercita o fluxo completo com mocks coordenados.
 
-- [ ] Criar `convex/processTurnFull.e2e.test.ts` que:
+- [x] Criar `convex/processTurnFull.e2e.test.ts` que:
   - Cria user + campaign + character + scene + alguns facts/entities/triggers seedados
   - Mocka `generateEmbedding` (retorna vetor determinístico)
   - Mocka chamada LLM narrativa (retorna stream com 1 text + 1 `roll_fate_dice` + mais texto)
@@ -274,7 +274,7 @@ Antes de declarar MVP backend completo, escrever um teste de integração que ex
     - `factsRevealed` se trigger revelou fato
     - `tokensUsed` populado
     - Embedding da mensagem GM agendado
-- [ ] Verificar que esse teste cobre: idempotência, paralelismo 5/6, hidden facts no anti-leak, BYOK
+- [x] Verificar que esse teste cobre: idempotência, paralelismo 5/6, hidden facts no anti-leak, BYOK
 
 ---
 
@@ -282,7 +282,7 @@ Antes de declarar MVP backend completo, escrever um teste de integração que ex
 
 Todos os `[ ]` acima marcados como `[x]` **e**:
 
-- [ ] Teste E2E (G-119) passa
+- [x] Teste E2E (G-119) passa
 - [ ] `npm test` passa sem skips
 - [ ] `npx convex deploy` em ambiente dev sem erros de schema
 - [ ] Em deploy de dev real (sem mocks): turno completo com chave OpenRouter de usuário gera resposta streamed com pelo menos 1 tool call persistido em `diceRolls` e métricas em `tokensUsed`
