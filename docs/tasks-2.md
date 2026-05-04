@@ -250,13 +250,13 @@ Existem dois arquivos: `convex/processTurn.ts` (versão antiga, simples) e `conv
 
 Para diagnosticar problemas em produção, cada turno precisa logar eventos-chave de forma estruturada (não `console.log` solto).
 
-- [ ] Criar `convex/lib/logger.ts` com `logTurnEvent({ turnId, stage, event, data })` que faz `console.log(JSON.stringify({ turnId, stage, event, ...data, ts: Date.now() }))`
-- [ ] Em `processTurnFull`, logar entrada/saída de cada estágio (`stage_start`, `stage_end`) com duração em ms
-- [ ] Logar tool calls executadas (`tool_executed` com `toolName`, `success`, `durationMs`)
-- [ ] Logar regenerações por anti-leak (`regeneration` com `attempt`, `reason`)
-- [ ] Logar consumo de tokens (`tokens_used` com `input`, `output`, `model`)
-- [ ] Não logar conteúdo de mensagens (privacidade) — apenas IDs e métricas
-- [ ] Testar que logger não quebra quando `data` tem objetos cíclicos (proteger com `try`)
+- [x] Criar `convex/lib/logger.ts` com `logTurnEvent({ turnId, stage, event, data })` que faz `console.log(JSON.stringify({ turnId, stage, event, ...data, ts: Date.now() }))`
+- [x] Em `processTurnFull`, logar entrada/saída de cada estágio (`stage_start`, `stage_end`) com duração em ms
+- [x] Logar tool calls executadas (`tool_executed` com `toolName`, `success`, `durationMs`)
+- [x] Logar regenerações por anti-leak (`regeneration` com `attempt`, `reason`)
+- [x] Logar consumo de tokens (`tokens_used` com `input`, `output`, `model`)
+- [x] Não logar conteúdo de mensagens (privacidade) — apenas IDs e métricas
+- [x] Testar que logger não quebra quando `data` tem objetos cíclicos (proteger com `try`)
 
 ### Validação do Schema do Turno End-to-End — G-119
 

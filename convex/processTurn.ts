@@ -8,6 +8,7 @@ import { retrieveSemanticContext } from "./lib/semanticMemory";
 import { vectorSearch } from "./lib/vectorSearch";
 import { resolveOpenRouterKey, OpenRouterKeyMissingError } from "./lib/llmAuth";
 import { getFateTool } from "./tools/catalog";
+import { logTurnEvent } from "./lib/logger";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -25,7 +26,8 @@ type ToolCallRecord = {
 
 type StreamEvent =
   | { type: "text_delta"; delta: string }
-  | { type: "tool_call"; toolName: string; toolParams: unknown; toolCallId: string };
+  | { type: "tool_call"; toolName: string; toolParams: unknown; toolCallId: string }
+  | { type: "usage"; input: number; output: number };
 
 async function* parseStreamingResponse(
   body: ReadableStream<Uint8Array>
@@ -45,6 +47,9 @@ async function* parseStreamingResponse(
       if (data === "[DONE]") return;
       try {
         const parsed = JSON.parse(data);
+        if (parsed.usage) {
+          yield { type: "usage", input: parsed.usage.prompt_tokens ?? 0, output: parsed.usage.completion_tokens ?? 0 };
+        }
         const delta = parsed.choices[0]?.delta;
         if (!delta) continue;
         if (delta.content) {
@@ -83,6 +88,7 @@ async function callLlm(
     model,
     messages,
     stream: true,
+    stream_options: { include_usage: true },
   };
   if (tools && tools.length > 0) {
     body.tools = tools;
@@ -173,7 +179,11 @@ export const processTurnFull = internalAction({
       premise: campaign.premise,
     });
 
+    const turnId = args.playerMessageId as string;
+
     // --- ESTÁGIO 2: montagem do contexto semântico ---
+    logTurnEvent({ turnId, stage: "semantic_context", event: "stage_start" });
+    const t_semantic = Date.now();
     const queryEmbedding = await ctx.runAction(
       internal.lib.embedding.generateEmbedding,
       { text: playerMessage.content }
@@ -212,8 +222,11 @@ export const processTurnFull = internalAction({
     };
 
     const aspectEvents = sceneAspects.map((a) => ({ name: a.text, description: `${a.freeInvokes} invocações livres` }));
+    logTurnEvent({ turnId, stage: "semantic_context", event: "stage_end", data: { durationMs: Date.now() - t_semantic } });
 
     // --- ESTÁGIO 3: classificação e disparo de triggers ---
+    logTurnEvent({ turnId, stage: "trigger_classification", event: "stage_start" });
+    const t_trigger = Date.now();
     const triggersFired: Id<"triggers">[] = [];
     const factsRevealedFromTriggers: Id<"facts">[] = [];
     const triggeredEventDescriptions: Array<{ name: string; description: string }> = [];
@@ -272,6 +285,8 @@ export const processTurnFull = internalAction({
       }
     }
 
+    logTurnEvent({ turnId, stage: "trigger_classification", event: "stage_end", data: { durationMs: Date.now() - t_trigger, triggersFiredCount: triggersFired.length } });
+
     const firedEvents = [...aspectEvents, ...triggeredEventDescriptions];
 
     const llmMessages = buildFullContext(
@@ -297,6 +312,8 @@ export const processTurnFull = internalAction({
       );
 
       // Streaming com loop de re-prompt após tool calls
+      logTurnEvent({ turnId, stage: "llm_stream", event: "stage_start", data: { attempt } });
+      const t_llm = Date.now();
       let pendingBuffer = "";
       let fullText = "";
       let lastFlushAt = Date.now();
@@ -332,6 +349,8 @@ export const processTurnFull = internalAction({
               pendingBuffer = "";
               lastFlushAt = Date.now();
             }
+          } else if (event.type === "usage") {
+            logTurnEvent({ turnId, stage: "llm_stream", event: "tokens_used", data: { input: event.input, output: event.output, model: llmConfig.narrativeModel } });
           } else if (event.type === "tool_call") {
             toolCallCount += 1;
             if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
@@ -382,11 +401,14 @@ export const processTurnFull = internalAction({
               if (!knownTool) {
                 console.warn("[G-113] Unknown tool call:", event.toolName, "— skipping execution");
                 const syntheticResult = { error: "unknown_tool", toolName: event.toolName };
+                logTurnEvent({ turnId, stage: "llm_stream", event: "tool_executed", data: { toolName: event.toolName, success: false } });
                 accumulatedToolCalls.push({ toolName: event.toolName, toolParams: event.toolParams, toolResult: syntheticResult, executedAt: Date.now() });
                 pendingToolCallsThisPass.push({ toolName: event.toolName, toolParams: event.toolParams, toolCallId: event.toolCallId || `tc_${toolCallCount}`, toolResult: syntheticResult });
                 continue;
               }
               let toolResult: unknown;
+              let toolSuccess = true;
+              const t_tool = Date.now();
               try {
                 toolResult = await ctx.runMutation(
                   internal.tools.executor.executeFateTool,
@@ -403,7 +425,9 @@ export const processTurnFull = internalAction({
               } catch (err) {
                 console.warn("[G-113] Tool execution failed for", event.toolName, ":", err);
                 toolResult = { error: "invalid_params", toolName: event.toolName };
+                toolSuccess = false;
               }
+              logTurnEvent({ turnId, stage: "llm_stream", event: "tool_executed", data: { toolName: event.toolName, success: toolSuccess, durationMs: Date.now() - t_tool } });
               accumulatedToolCalls.push({
                 toolName: event.toolName,
                 toolParams: event.toolParams,
@@ -444,6 +468,8 @@ export const processTurnFull = internalAction({
           });
         }
       }
+
+      logTurnEvent({ turnId, stage: "llm_stream", event: "stage_end", data: { durationMs: Date.now() - t_llm, attempt } });
 
       // Flush final
       if (pendingBuffer.length > 0) {
@@ -506,6 +532,8 @@ export const processTurnFull = internalAction({
         .map((d) => ({ id: d._id as string, content: d.content }));
 
       // --- ESTÁGIOS 5 e 6 em paralelo ---
+      logTurnEvent({ turnId, stage: "anti_leak_validation", event: "stage_start", data: { attempt } });
+      const t_antileak = Date.now();
       const [leakResult, factExtractionError] = await Promise.all([
         ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
           messageId: gmMessageId,
@@ -520,6 +548,8 @@ export const processTurnFull = internalAction({
         }).then(() => null).catch((e: unknown) => e),
       ]);
 
+      logTurnEvent({ turnId, stage: "anti_leak_validation", event: "stage_end", data: { durationMs: Date.now() - t_antileak, vazou: leakResult.vazou } });
+
       if (factExtractionError !== null && !leakResult.vazou) {
         await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
           messageId: gmMessageId,
@@ -531,6 +561,8 @@ export const processTurnFull = internalAction({
       if (!leakResult.vazou) {
 
         // Estágio 7: housekeeping
+        logTurnEvent({ turnId, stage: "housekeeping", event: "stage_start" });
+        const t_hk = Date.now();
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
           gmMessageId,
           triggersFired,
@@ -553,10 +585,12 @@ export const processTurnFull = internalAction({
           }
         }
 
+        logTurnEvent({ turnId, stage: "housekeeping", event: "stage_end", data: { durationMs: Date.now() - t_hk } });
         return { success: true, messageId: gmMessageId };
       }
 
       if (attempt < MAX_REGENERATIONS) {
+        logTurnEvent({ turnId, stage: "anti_leak_validation", event: "regeneration", data: { attempt, reason: "anti_leak" } });
         await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
           messageId: gmMessageId,
           status: "leaked",
