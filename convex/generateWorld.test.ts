@@ -392,6 +392,112 @@ describe("generateWorld", () => {
     });
   });
 
+  describe("idempotência", () => {
+    it("segundo chamado de generateWorld em campanha ready é no-op", async () => {
+      const t = convexTest(schema, modules);
+
+      const { campaignId } = await t.run(async (ctx) => {
+        const userId = await ctx.db.insert("users", {
+          email: "gm@test.com",
+          displayName: "GM",
+          tokenIdentifier: "token|idempotency001",
+        });
+        const campaignId = await ctx.db.insert("campaigns", {
+          userId,
+          name: "A Lâmina de Ferro",
+          premise: "Um caçador de recompensas em uma cidade portuária corrupta.",
+          tone: "noir",
+          expectedDuration: "one-shot",
+          status: "active",
+          setupStatus: "ready",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        });
+        return { userId, campaignId };
+      });
+
+      const fakeFetch = vi.fn();
+      vi.stubGlobal("fetch", fakeFetch);
+
+      await t.action(internal.generateWorld.generateWorld, {
+        campaignId,
+        apiKey: "test-key",
+      });
+
+      expect(fakeFetch.mock.calls.length).toBe(0);
+
+      await t.run(async (ctx) => {
+        const entities = await ctx.db
+          .query("entities")
+          .withIndex("by_campaign", (q: any) => q.eq("campaignId", campaignId))
+          .collect();
+        expect(entities.length).toBe(0);
+      });
+    });
+
+    it("generateWorld interrompido pode ser re-executado sem duplicar dados", async () => {
+      const t = convexTest(schema, modules);
+
+      const { campaignId } = await t.run(async (ctx) => {
+        const userId = await ctx.db.insert("users", {
+          email: "gm@test.com",
+          displayName: "GM",
+          tokenIdentifier: "token|idempotency002",
+        });
+        const campaignId = await ctx.db.insert("campaigns", {
+          userId,
+          name: "A Lâmina de Ferro",
+          premise: "Um caçador de recompensas em uma cidade portuária corrupta.",
+          tone: "noir",
+          expectedDuration: "one-shot",
+          status: "setup",
+          createdAt: Date.now(),
+          lastActivityAt: Date.now(),
+        });
+        // Simulate orphan entities from a previous partial run
+        await ctx.db.insert("entities", {
+          campaignId,
+          type: "location",
+          name: "Local Órfão 1",
+          description: "Entidade de execução anterior.",
+          visibility: "known",
+          npcStats: { aspects: [] },
+        });
+        await ctx.db.insert("entities", {
+          campaignId,
+          type: "npc",
+          name: "NPC Órfão 2",
+          description: "NPC de execução anterior.",
+          visibility: "hidden",
+          npcStats: { tier: "supporting", hidden_motivation: "nenhuma" },
+        });
+        return { userId, campaignId };
+      });
+
+      const fakeFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify(mockWorldResponse) } }],
+        }),
+      });
+      vi.stubGlobal("fetch", fakeFetch);
+
+      await t.action(internal.generateWorld.generateWorld, {
+        campaignId,
+        apiKey: "test-key",
+      });
+
+      await t.run(async (ctx) => {
+        const entities = await ctx.db
+          .query("entities")
+          .withIndex("by_campaign", (q: any) => q.eq("campaignId", campaignId))
+          .collect();
+        // Should be 4 (1 location + 3 npcs from mock), NOT 2 + 4 = 6
+        expect(entities.length).toBe(4);
+      });
+    });
+  });
+
   it("agenda embeddings para entidades, fatos e gatilhos criados", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await t.run(setupCampaign);

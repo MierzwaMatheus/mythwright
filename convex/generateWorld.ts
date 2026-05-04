@@ -29,6 +29,35 @@ export const _setSetupStatus = internalMutation({
   },
 });
 
+export const _cleanPartialWorldData = internalMutation({
+  args: { campaignId: v.id("campaigns") },
+  handler: async (ctx, args) => {
+    const entities = await ctx.db
+      .query("entities")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const entity of entities) {
+      await ctx.db.delete(entity._id);
+    }
+
+    const facts = await ctx.db
+      .query("facts")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const fact of facts) {
+      await ctx.db.delete(fact._id);
+    }
+
+    const triggers = await ctx.db
+      .query("triggers")
+      .withIndex("by_campaign", (q) => q.eq("campaignId", args.campaignId))
+      .collect();
+    for (const trigger of triggers) {
+      await ctx.db.delete(trigger._id);
+    }
+  },
+});
+
 export const _persistWorld = internalMutation({
   args: {
     campaignId: v.id("campaigns"),
@@ -162,6 +191,13 @@ export const generateWorld = internalAction({
     });
 
     if (!campaign) throw new Error("Campaign not found");
+
+    if (campaign.setupStatus === "ready") return;
+    if (campaign.setupStatus === "generating") return;
+
+    await ctx.runMutation(internal.generateWorld._cleanPartialWorldData, {
+      campaignId: args.campaignId,
+    });
 
     await ctx.runMutation(internal.generateWorld._setSetupStatus, {
       campaignId: args.campaignId,

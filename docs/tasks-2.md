@@ -224,10 +224,10 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 
 `generateWorld` pode ser chamado mais de uma vez (retry, reagendamento). Sem idempotência, pode duplicar entidades/fatos/triggers.
 
-- [ ] Adicionar guard no início de `generateWorld`: se `campaign.setupStatus === "ready"` ou já existem entidades para a campanha, retornar sem reexecutar
-- [ ] Para retry após falha parcial: limpar registros parciais (entidades/fatos/triggers da campanha sem cena associada) antes de reexecutar **ou** usar `setupStatus: "generating"` como lock
-- [ ] Testar que segundo chamado de `generateWorld` em campanha `ready` é no-op
-- [ ] Testar que `generateWorld` interrompido (mock que falha no meio) pode ser re-executado sem duplicar dados
+- [x] Adicionar guard no início de `generateWorld`: se `campaign.setupStatus === "ready"` ou já existem entidades para a campanha, retornar sem reexecutar
+- [x] Para retry após falha parcial: limpar registros parciais (entidades/fatos/triggers da campanha sem cena associada) antes de reexecutar **ou** usar `setupStatus: "generating"` como lock
+- [x] Testar que segundo chamado de `generateWorld` em campanha `ready` é no-op
+- [x] Testar que `generateWorld` interrompido (mock que falha no meio) pode ser re-executado sem duplicar dados
 
 ---
 
