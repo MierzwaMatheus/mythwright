@@ -237,12 +237,12 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 
 Existem dois arquivos: `convex/processTurn.ts` (versão antiga, simples) e `convex/processTurnFull.ts` (versão dos 8 estágios). Manter os dois é fonte de confusão.
 
-- [ ] Auditar quais helpers de `processTurn.ts` ainda são usados (`markMessageStatus`, `updateGmMessageContent`)
-- [ ] Mover esses helpers para `processTurnFull.ts` ou para `convex/lib/messageState.ts`
-- [ ] Atualizar todos os imports
-- [ ] Deletar `convex/processTurn.ts` e `convex/processTurn.test.ts` (ou renomear teste para apontar pra nova localização)
-- [ ] Renomear `processTurnFull.ts` → `processTurn.ts` (nome canônico)
-- [ ] Confirmar que `npm test` continua passando
+- [x] Auditar quais helpers de `processTurn.ts` ainda são usados (`markMessageStatus`, `updateGmMessageContent`)
+- [x] Mover esses helpers para `processTurnFull.ts` ou para `convex/lib/messageState.ts`
+- [x] Atualizar todos os imports
+- [x] Deletar `convex/processTurn.ts` e `convex/processTurn.test.ts` (ou renomear teste para apontar pra nova localização)
+- [x] Renomear `processTurnFull.ts` → `processTurn.ts` (nome canônico)
+- [x] Confirmar que `npm test` continua passando
 
 ### Logging Estruturado — G-118
 
@@ -250,19 +250,19 @@ Existem dois arquivos: `convex/processTurn.ts` (versão antiga, simples) e `conv
 
 Para diagnosticar problemas em produção, cada turno precisa logar eventos-chave de forma estruturada (não `console.log` solto).
 
-- [ ] Criar `convex/lib/logger.ts` com `logTurnEvent({ turnId, stage, event, data })` que faz `console.log(JSON.stringify({ turnId, stage, event, ...data, ts: Date.now() }))`
-- [ ] Em `processTurnFull`, logar entrada/saída de cada estágio (`stage_start`, `stage_end`) com duração em ms
-- [ ] Logar tool calls executadas (`tool_executed` com `toolName`, `success`, `durationMs`)
-- [ ] Logar regenerações por anti-leak (`regeneration` com `attempt`, `reason`)
-- [ ] Logar consumo de tokens (`tokens_used` com `input`, `output`, `model`)
-- [ ] Não logar conteúdo de mensagens (privacidade) — apenas IDs e métricas
-- [ ] Testar que logger não quebra quando `data` tem objetos cíclicos (proteger com `try`)
+- [x] Criar `convex/lib/logger.ts` com `logTurnEvent({ turnId, stage, event, data })` que faz `console.log(JSON.stringify({ turnId, stage, event, ...data, ts: Date.now() }))`
+- [x] Em `processTurnFull`, logar entrada/saída de cada estágio (`stage_start`, `stage_end`) com duração em ms
+- [x] Logar tool calls executadas (`tool_executed` com `toolName`, `success`, `durationMs`)
+- [x] Logar regenerações por anti-leak (`regeneration` com `attempt`, `reason`)
+- [x] Logar consumo de tokens (`tokens_used` com `input`, `output`, `model`)
+- [x] Não logar conteúdo de mensagens (privacidade) — apenas IDs e métricas
+- [x] Testar que logger não quebra quando `data` tem objetos cíclicos (proteger com `try`)
 
 ### Validação do Schema do Turno End-to-End — G-119
 
 Antes de declarar MVP backend completo, escrever um teste de integração que exercita o fluxo completo com mocks coordenados.
 
-- [ ] Criar `convex/processTurnFull.e2e.test.ts` que:
+- [x] Criar `convex/processTurnFull.e2e.test.ts` que:
   - Cria user + campaign + character + scene + alguns facts/entities/triggers seedados
   - Mocka `generateEmbedding` (retorna vetor determinístico)
   - Mocka chamada LLM narrativa (retorna stream com 1 text + 1 `roll_fate_dice` + mais texto)
@@ -274,7 +274,7 @@ Antes de declarar MVP backend completo, escrever um teste de integração que ex
     - `factsRevealed` se trigger revelou fato
     - `tokensUsed` populado
     - Embedding da mensagem GM agendado
-- [ ] Verificar que esse teste cobre: idempotência, paralelismo 5/6, hidden facts no anti-leak, BYOK
+- [x] Verificar que esse teste cobre: idempotência, paralelismo 5/6, hidden facts no anti-leak, BYOK
 
 ---
 
@@ -282,7 +282,7 @@ Antes de declarar MVP backend completo, escrever um teste de integração que ex
 
 Todos os `[ ]` acima marcados como `[x]` **e**:
 
-- [ ] Teste E2E (G-119) passa
+- [x] Teste E2E (G-119) passa
 - [ ] `npm test` passa sem skips
 - [ ] `npx convex deploy` em ambiente dev sem erros de schema
 - [ ] Em deploy de dev real (sem mocks): turno completo com chave OpenRouter de usuário gera resposta streamed com pelo menos 1 tool call persistido em `diceRolls` e métricas em `tokensUsed`

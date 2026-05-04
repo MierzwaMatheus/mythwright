@@ -102,7 +102,7 @@ export const resolveCompel = mutation({
 
     if (compel.triggeringMessageId && compel.pausedGmMessageId) {
       const resolvedStatus = args.decision === "accept" ? "accepted" : "refused";
-      await ctx.scheduler.runAfter(0, internal.processTurnFull.continueAfterCompel, {
+      await ctx.scheduler.runAfter(0, internal.processTurn.continueAfterCompel, {
         playerMessageId: compel.triggeringMessageId,
         gmMessageId: compel.pausedGmMessageId,
         compelId: args.compelId,

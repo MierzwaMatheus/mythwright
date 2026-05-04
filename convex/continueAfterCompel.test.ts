@@ -108,7 +108,7 @@ describe("processTurnFull — compel_aspect persiste triggeringMessageId e pause
       body: compelAspectStream(aspectId, characterId),
     });
 
-    const result = await t.action(internal.processTurnFull.processTurnFull, {
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
       playerMessageId,
       antiLeakValidationEnabled: false,
@@ -171,7 +171,7 @@ describe("continueAfterCompel", () => {
       body: textStream("Continuação da narrativa após compel"),
     });
 
-    const result = await t.action(internal.processTurnFull.continueAfterCompel, {
+    const result = await t.action(internal.processTurn.continueAfterCompel, {
       playerMessageId,
       gmMessageId: gmMessageId!,
       compelId: compelId!,
@@ -224,7 +224,7 @@ describe("continueAfterCompel", () => {
       body: textStream("Narrativa com recusa"),
     });
 
-    const result = await t.action(internal.processTurnFull.continueAfterCompel, {
+    const result = await t.action(internal.processTurn.continueAfterCompel, {
       playerMessageId,
       gmMessageId: gmMessageId!,
       compelId: compelId!,
@@ -281,7 +281,7 @@ describe("continueAfterCompel", () => {
       await ctx.db.delete(fakeCompelId);
     });
 
-    const result = await t.action(internal.processTurnFull.continueAfterCompel, {
+    const result = await t.action(internal.processTurn.continueAfterCompel, {
       playerMessageId,
       gmMessageId: gmMessageId!,
       compelId: fakeCompelId!,

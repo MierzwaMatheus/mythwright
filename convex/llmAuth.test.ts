@@ -213,7 +213,7 @@ describe("processTurnFull — BYOK integration", () => {
 
     vi.stubEnv("OPENROUTER_API_KEY", "");
 
-    const result = await t.action(internal.processTurnFull.processTurnFull, {
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
       playerMessageId,
     });
@@ -301,7 +301,7 @@ describe("processTurnFull — BYOK integration", () => {
       return { ok: true, body: stream } as unknown as Response;
     });
 
-    await t.action(internal.processTurnFull.processTurnFull, {
+    await t.action(internal.processTurn.processTurnFull, {
       campaignId,
       playerMessageId,
     });
