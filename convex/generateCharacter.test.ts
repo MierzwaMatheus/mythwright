@@ -223,6 +223,144 @@ describe("generateCharacter", () => {
     ).rejects.toThrow();
   });
 
+  it("estende stress físico para 4 caixas quando Vigor >= 3", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const mockWithVigor = {
+      name: "Aria Forte",
+      high_concept: "Guerreira Incansável das Estepes",
+      trouble: "A Cicatriz que Nunca Fecha",
+      other_aspects: [
+        "Treinada desde a Infância para Combate",
+        "Irmão Desaparecido na Batalha",
+        "Código de Honra Inflexível",
+      ],
+      skills: {
+        Investigar: 4,
+        Vigor: 3,
+        Empatia: 3,
+        Comunicar: 2,
+        Atletismo: 2,
+        Notar: 2,
+        Lutar: 1,
+        Contatos: 1,
+        Saber: 1,
+        Sobreviver: 1,
+      },
+      stunts: [
+        { name: "Golpe Poderoso", description: "+2 em Lutar quando ataca alvos maiores." },
+        { name: "Resistência de Ferro", description: "+2 em Vigor para resistir a venenos." },
+        { name: "Caminhante de Estepes", description: "Pode usar Sobreviver em vez de Atletismo em terrenos abertos." },
+      ],
+      fate_points: 3,
+      stress: {
+        physical: [false, false, false],
+        mental: [false, false, false],
+      },
+      background_summary: "Aria cresceu nas estepes e foi treinada desde jovem para o combate.",
+    };
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(mockWithVigor) } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const characterId = await t.action(internal.generateCharacter.generateCharacter, {
+      campaignId,
+      characterPremise: "Uma guerreira robusta das estepes.",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId);
+      expect(character!.stress.physical).toHaveLength(4);
+    });
+  });
+
+  it("estende stress mental para 4 caixas quando Vontade >= 3", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const mockWithVontade = {
+      name: "Mira Mente",
+      high_concept: "Sábia Determinada dos Arquivos Antigos",
+      trouble: "Segredos que Não Deveria Conhecer",
+      other_aspects: [
+        "Formada na Escola de Magia Proibida",
+        "Aliada Inesperada entre os Nobres",
+        "Memória Perfeita e Maldita",
+      ],
+      skills: {
+        Investigar: 4,
+        Vontade: 3,
+        Empatia: 3,
+        Comunicar: 2,
+        Atletismo: 2,
+        Notar: 2,
+        Lutar: 1,
+        Contatos: 1,
+        Saber: 1,
+        Sobreviver: 1,
+      },
+      stunts: [
+        { name: "Mente Blindada", description: "+2 em Vontade para resistir a manipulação mental." },
+        { name: "Arquivo Vivo", description: "+2 em Saber quando tenta lembrar de textos antigos." },
+        { name: "Persuasão Calma", description: "Pode usar Vontade em vez de Comunicar em negociações longas." },
+      ],
+      fate_points: 3,
+      stress: {
+        physical: [false, false, false],
+        mental: [false, false, false],
+      },
+      background_summary: "Mira dedicou sua vida ao estudo e desenvolveu uma vontade inabalável.",
+    };
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(mockWithVontade) } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const characterId = await t.action(internal.generateCharacter.generateCharacter, {
+      campaignId,
+      characterPremise: "Uma sábia de vontade férrea.",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId);
+      expect(character!.stress.mental).toHaveLength(4);
+    });
+  });
+
+  it("não estende stress quando Vigor e Vontade ausentes", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(mockCharacterResponse) } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    const characterId = await t.action(internal.generateCharacter.generateCharacter, {
+      campaignId,
+      characterPremise: "Um detetive desiludido.",
+    });
+
+    await t.run(async (ctx) => {
+      const character = await ctx.db.get(characterId);
+      expect(character!.stress.physical).toHaveLength(3);
+      expect(character!.stress.mental).toHaveLength(3);
+    });
+  });
+
   it("lança erro quando LLM retorna ficha com pirâmide incorreta", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await t.run(setupCampaign);

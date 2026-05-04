@@ -1337,3 +1337,71 @@ describe("processTurnFull (G-113 — tool call mal-formado)", () => {
     expect((failedToolCall?.toolResult as any)?.error).toBe("invalid_params");
   });
 });
+
+describe("processTurnFull (G-114 — guard setupStatus)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  async function setupCampaignWithSetupStatus(
+    t: ReturnType<typeof convexTest>,
+    setupStatus: "draft" | "generating" | "ready" | undefined
+  ) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g114@test.com",
+        displayName: "G114 Tester",
+        tokenIdentifier: "token|g114-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G114 Campaign",
+        premise: "Teste de guard setupStatus.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        setupStatus,
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Ação do jogador.",
+        clientMessageId: "g114-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+  }
+
+  it("G-114a: campanha com setupStatus 'generating' retorna { success: false, reason: 'campaign_not_ready' }", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupCampaignWithSetupStatus(t, "generating");
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+    });
+
+    expect(result).toEqual({ success: false, reason: "campaign_not_ready" });
+  });
+
+  it("G-114b: campanha com setupStatus 'draft' retorna { success: false, reason: 'campaign_not_ready' }", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupCampaignWithSetupStatus(t, "draft");
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+    });
+
+    expect(result).toEqual({ success: false, reason: "campaign_not_ready" });
+  });
+});

@@ -98,6 +98,12 @@ export const generateCharacter = internalAction({
       );
     }
 
+    const physicalStress = [...charData.stress.physical];
+    const mentalStress = [...charData.stress.mental];
+    if ((charData.skills["Vigor"] ?? 0) >= 3) physicalStress.push(false);
+    if ((charData.skills["Vontade"] ?? 0) >= 3) mentalStress.push(false);
+    const stress = { physical: physicalStress, mental: mentalStress };
+
     // Flatten aspects: [high_concept, trouble, ...other_aspects]
     const aspects = [charData.high_concept, charData.trouble, ...charData.other_aspects];
 
@@ -113,7 +119,7 @@ export const generateCharacter = internalAction({
         skills: charData.skills,
         stunts,
         fatePoints: charData.fate_points,
-        stress: charData.stress,
+        stress,
       },
     );
 

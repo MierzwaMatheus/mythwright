@@ -195,13 +195,13 @@ Modelos open-source podem emitir tool calls com argumentos JSON inválidos ou no
 
 A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é setado corretamente em todos os pontos do ciclo de vida.
 
-- [ ] Verificar schema: `setupStatus: v.optional(v.union(v.literal("draft"), v.literal("generating"), v.literal("ready")))` em `campaigns` — adicionar se ausente
-- [ ] `campaigns.createCampaign` define `setupStatus: "draft"` ao criar
-- [ ] `generateWorld` muda para `"generating"` ao iniciar e `"ready"` ao concluir com sucesso
-- [ ] `generateWorld` reverte para `"draft"` em caso de falha (não deixa em `"generating"` órfão)
-- [ ] `processTurnFull` rejeita turnos quando `setupStatus !== "ready"` (retorna `{ success: false, reason: "campaign_not_ready" }`)
-- [ ] Testar transições: draft → generating → ready
-- [ ] Testar que falha de LLM em `generateWorld` reverte para `draft` corretamente
+- [x] Verificar schema: `setupStatus: v.optional(v.union(v.literal("draft"), v.literal("generating"), v.literal("ready")))` em `campaigns` — adicionar se ausente
+- [x] `campaigns.createCampaign` define `setupStatus: "draft"` ao criar
+- [x] `generateWorld` muda para `"generating"` ao iniciar e `"ready"` ao concluir com sucesso
+- [x] `generateWorld` reverte para `"draft"` em caso de falha (não deixa em `"generating"` órfão)
+- [x] `processTurnFull` rejeita turnos quando `setupStatus !== "ready"` (retorna `{ success: false, reason: "campaign_not_ready" }`)
+- [x] Testar transições: draft → generating → ready
+- [x] Testar que falha de LLM em `generateWorld` reverte para `draft` corretamente
 
 ### Geração de Personagem Persistindo na Campanha — G-115
 
@@ -212,11 +212,11 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 2. Aspectos seguem estrutura FATE Condensed (Conceito Alto + Tribulação + 3 outros)
 3. Stress tracks são inicializados com tamanho correto (3 caixas físicas, 3 mentais por padrão; estendido se Vigor/Vontade ≥ +3)
 
-- [ ] Auditar `generateCharacter.ts`: verificar se chama `characters.createCharacter` ao final ou se apenas retorna o objeto parseado
-- [ ] Se não persiste: adicionar passo de persistência via mutation interna
-- [ ] Validar estrutura mínima do output: `aspects.length >= 5`, `skills` com pelo menos 5 entries, `fatePoints: 3` (default), `stress.physical.length >= 3`, `stress.mental.length >= 3`
-- [ ] Estender `stress.physical` para 4 caixas se `skills.Vigor >= 3`; mesmo para mental com Vontade
-- [ ] Testar que `generateCharacter` cria registro em `characters` com todos os campos válidos
+- [x] Auditar `generateCharacter.ts`: verificar se chama `characters.createCharacter` ao final ou se apenas retorna o objeto parseado
+- [x] Se não persiste: adicionar passo de persistência via mutation interna
+- [x] Validar estrutura mínima do output: `aspects.length >= 5`, `skills` com pelo menos 5 entries, `fatePoints: 3` (default), `stress.physical.length >= 3`, `stress.mental.length >= 3`
+- [x] Estender `stress.physical` para 4 caixas se `skills.Vigor >= 3`; mesmo para mental com Vontade
+- [x] Testar que `generateCharacter` cria registro em `characters` com todos os campos válidos
 
 ### Idempotência da Geração de Mundo — G-116
 
@@ -224,10 +224,10 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 
 `generateWorld` pode ser chamado mais de uma vez (retry, reagendamento). Sem idempotência, pode duplicar entidades/fatos/triggers.
 
-- [ ] Adicionar guard no início de `generateWorld`: se `campaign.setupStatus === "ready"` ou já existem entidades para a campanha, retornar sem reexecutar
-- [ ] Para retry após falha parcial: limpar registros parciais (entidades/fatos/triggers da campanha sem cena associada) antes de reexecutar **ou** usar `setupStatus: "generating"` como lock
-- [ ] Testar que segundo chamado de `generateWorld` em campanha `ready` é no-op
-- [ ] Testar que `generateWorld` interrompido (mock que falha no meio) pode ser re-executado sem duplicar dados
+- [x] Adicionar guard no início de `generateWorld`: se `campaign.setupStatus === "ready"` ou já existem entidades para a campanha, retornar sem reexecutar
+- [x] Para retry após falha parcial: limpar registros parciais (entidades/fatos/triggers da campanha sem cena associada) antes de reexecutar **ou** usar `setupStatus: "generating"` como lock
+- [x] Testar que segundo chamado de `generateWorld` em campanha `ready` é no-op
+- [x] Testar que `generateWorld` interrompido (mock que falha no meio) pode ser re-executado sem duplicar dados
 
 ---
 

@@ -77,6 +77,20 @@ describe("campaigns.createCampaign", () => {
     ).rejects.toThrow();
   });
 
+  it("define setupStatus: 'draft' ao criar campanha", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|c006", email: "gm6@mythwright.com" });
+
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "GM6" });
+    const id = await identity.mutation(api.campaigns.createCampaign, campaignInput);
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(id as Id<"campaigns">);
+      expect(campaign).not.toBeNull();
+      expect(campaign!.setupStatus).toBe("draft");
+    });
+  });
+
   it("persiste createdAt e lastActivityAt como números (timestamps)", async () => {
     const t = convexTest(schema, modules);
     const identity = t.withIdentity({ tokenIdentifier: "token|c005", email: "gm5@mythwright.com" });
