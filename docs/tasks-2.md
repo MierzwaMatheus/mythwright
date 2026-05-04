@@ -104,11 +104,11 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 `convex/lib/embedding.ts:11` lê `process.env.TOGETHER_API_KEY`, mas nada indica se a chamada acontece via Together, OpenRouter ou HF. Modelo é hard-coded.
 
-- [ ] Confirmar provedor: usar OpenRouter (consistência com narrativa/utility) **ou** Together AI (mais barato para embedding) — decidir e documentar em `convex/lib/embedding.ts` no topo do arquivo
-- [ ] Ler modelo de `campaign.llmConfig.embeddingModel` (default `BAAI/bge-m3`) em vez de hard-code
-- [ ] Se provedor for Together: aceitar `TOGETHER_API_KEY` como BYOK
+- [x] Confirmar provedor: usar OpenRouter (consistência com narrativa/utility) **ou** Together AI (mais barato para embedding) — decidir e documentar em `convex/lib/embedding.ts` no topo do arquivo
+- [x] Ler modelo de `campaign.llmConfig.embeddingModel` (default `BAAI/bge-m3`) em vez de hard-code
+- [x] Se provedor for Together: aceitar `TOGETHER_API_KEY` como BYOK
 - [ ] Se provedor for OpenRouter: usar a mesma chave do usuário descriptografada (G-106)
-- [ ] Validar que retorno tem dimensão 1024 (compatível com `vectorIndex` do schema); falhar com erro claro se diferente
+- [x] Validar que retorno tem dimensão 1024 (compatível com `vectorIndex` do schema); falhar com erro claro se diferente
 
 ### LLM Config Resolver com Fallback — G-108
 

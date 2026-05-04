@@ -60,6 +60,32 @@ describe("generateEmbedding", () => {
     expect(body.input).toBe("Texto de teste");
     expect(body.model).toBe("BAAI/bge-m3");
   });
+
+  it("aceita model custom e o envia para a API", async () => {
+    const t = convexTest(schema, modules);
+    const fakeEmbedding = makeFakeEmbedding(1024);
+    const fakeFetch = mockFetch(fakeEmbedding);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await t.action(internal.lib.embedding.generateEmbedding, {
+      text: "Texto de teste",
+      model: "openai/text-embedding-3-small",
+    });
+
+    const [, options] = fakeFetch.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.model).toBe("openai/text-embedding-3-small");
+  });
+
+  it("lanca erro claro quando API retorna embedding com dimensao errada", async () => {
+    const t = convexTest(schema, modules);
+    const fakeEmbedding = makeFakeEmbedding(512); // dimensao errada
+    vi.stubGlobal("fetch", mockFetch(fakeEmbedding));
+
+    await expect(
+      t.action(internal.lib.embedding.generateEmbedding, { text: "Texto de teste" }),
+    ).rejects.toThrow("Embedding dimension mismatch: expected 1024, got 512");
+  });
 });
 
 describe("embedFact", () => {
@@ -114,6 +140,32 @@ describe("embedFact", () => {
     const fact = await t.run(async (ctx) => ctx.db.get(factId));
     expect(fact?.embedding).toHaveLength(1024);
     expect(fact?.embedding).toEqual(fakeEmbedding);
+  });
+
+  it("usa embeddingModel da campanha quando diferente do default", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, factId } = await setupUserCampaignFact(t);
+    const fakeEmbedding = makeFakeEmbedding(1024);
+    const fakeFetch = mockFetch(fakeEmbedding);
+    vi.stubGlobal("fetch", fakeFetch);
+
+    // Configura campanha com modelo customizado
+    await t.run(async (ctx) => {
+      await ctx.db.patch(campaignId, {
+        llmConfig: {
+          narrativeModel: "deepseek/deepseek-chat-v3-0324",
+          utilityModel: "meta-llama/llama-3.1-8b-instruct",
+          extractionModel: "meta-llama/llama-3.1-8b-instruct",
+          embeddingModel: "openai/text-embedding-3-small",
+        },
+      });
+    });
+
+    await t.action(internal.lib.embedding.embedFact, { factId });
+
+    const [, options] = fakeFetch.mock.calls[0];
+    const body = JSON.parse(options.body);
+    expect(body.model).toBe("openai/text-embedding-3-small");
   });
 });
 

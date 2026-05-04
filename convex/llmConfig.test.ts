@@ -41,6 +41,38 @@ describe("getLlmConfig", () => {
     expect(config.embeddingModel).toBe("baai/bge-m3");
   });
 
+  it("merge com defaults preserva campos nao sobrescritos", async () => {
+    // Garante que getLlmConfig faz { ...DEFAULT_LLM_CONFIG, ...campaign.llmConfig }
+    // e nao apenas retorna campaign.llmConfig puro (que perderia defaults se
+    // alguem gravar um objeto sem todos os campos no futuro).
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|llm003", "llm003@test.com");
+
+    // Salva apenas narrativeModel diferente, o resto igual ao default
+    await t.run(async (ctx) => {
+      await ctx.db.patch(campaignId, {
+        llmConfig: {
+          narrativeModel: "openai/gpt-4o",
+          utilityModel: "meta-llama/llama-3.1-8b-instruct",
+          extractionModel: "meta-llama/llama-3.1-8b-instruct",
+          embeddingModel: "baai/bge-m3",
+        },
+      });
+    });
+
+    const config = await t.run(async (ctx) => {
+      const { getLlmConfig } = await import("./lib/llmConfig");
+      return await getLlmConfig(ctx, campaignId);
+    });
+
+    // narrativeModel foi customizado, deve retornar o customizado
+    expect(config.narrativeModel).toBe("openai/gpt-4o");
+    // os outros nao foram alterados, devem retornar os defaults
+    expect(config.utilityModel).toBe("meta-llama/llama-3.1-8b-instruct");
+    expect(config.extractionModel).toBe("meta-llama/llama-3.1-8b-instruct");
+    expect(config.embeddingModel).toBe("baai/bge-m3");
+  });
+
   it("respeita override por campanha quando llmConfig presente", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupUserAndCampaign(t, "token|llm002", "llm002@test.com");
