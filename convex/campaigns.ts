@@ -22,6 +22,7 @@ export const createCampaign = mutation({
       tone: args.tone,
       expectedDuration: args.expectedDuration,
       status: "setup",
+      setupStatus: "draft",
       createdAt: now,
       lastActivityAt: now,
     });

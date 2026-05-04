@@ -22,6 +22,11 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("archived"),
     ),
+    setupStatus: v.optional(v.union(
+      v.literal("draft"),
+      v.literal("generating"),
+      v.literal("ready"),
+    )),
     createdAt: v.number(),
     lastActivityAt: v.number(),
     cheatModeEnabled: v.optional(v.boolean()),

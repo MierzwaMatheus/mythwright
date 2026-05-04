@@ -19,6 +19,16 @@ export const _getCampaign = internalQuery({
 
 // ── Mutations ──────────────────────────────────────────────────────────────────
 
+export const _setSetupStatus = internalMutation({
+  args: {
+    campaignId: v.id("campaigns"),
+    setupStatus: v.union(v.literal("draft"), v.literal("generating"), v.literal("ready")),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.campaignId, { setupStatus: args.setupStatus });
+  },
+});
+
 export const _persistWorld = internalMutation({
   args: {
     campaignId: v.id("campaigns"),
@@ -130,10 +140,11 @@ export const _persistWorld = internalMutation({
       createdAt: now,
     });
 
-    // 7. Update campaign: set currentSceneId and status to active
+    // 7. Update campaign: set currentSceneId, status to active, and setupStatus to ready
     await ctx.db.patch(args.campaignId, {
       currentSceneId: sceneId,
       status: "active",
+      setupStatus: "ready",
       lastActivityAt: now,
     });
 
@@ -152,59 +163,72 @@ export const generateWorld = internalAction({
 
     if (!campaign) throw new Error("Campaign not found");
 
-    const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
+    await ctx.runMutation(internal.generateWorld._setSetupStatus, {
       campaignId: args.campaignId,
+      setupStatus: "generating",
     });
 
-    const prompt = buildWorldGenerationPrompt({
-      campaignName: campaign.name,
-      premise: campaign.premise,
-      tone: campaign.tone,
-      expectedDuration: campaign.expectedDuration,
-      freeDescription: "",
-    });
+    try {
+      const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
+        campaignId: args.campaignId,
+      });
 
-    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        model: llmConfig.narrativeModel,
-        messages: [{ role: "user", content: prompt }],
-        response_format: { type: "json_object" },
-      }),
-    });
+      const prompt = buildWorldGenerationPrompt({
+        campaignName: campaign.name,
+        premise: campaign.premise,
+        tone: campaign.tone,
+        expectedDuration: campaign.expectedDuration,
+        freeDescription: "",
+      });
 
-    if (!response.ok) {
-      throw new Error(`LLM API error: ${response.status}`);
-    }
+      const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model: llmConfig.narrativeModel,
+          messages: [{ role: "user", content: prompt }],
+          response_format: { type: "json_object" },
+        }),
+      });
 
-    const data = await response.json();
-    const raw = data.choices[0].message.content;
-    const worldData = parseWorldGenerationResponse(raw);
+      if (!response.ok) {
+        throw new Error(`LLM API error: ${response.status}`);
+      }
 
-    if (!worldData) {
-      throw new Error("Failed to parse world generation response from LLM");
-    }
+      const data = await response.json();
+      const raw = data.choices[0].message.content;
+      const worldData = parseWorldGenerationResponse(raw);
 
-    // Persist all data in a single mutation (atomic)
-    const { entityIds, factIds, triggerIds } = await ctx.runMutation(
-      internal.generateWorld._persistWorld,
-      { campaignId: args.campaignId, worldData },
-    );
+      if (!worldData) {
+        throw new Error("Failed to parse world generation response from LLM");
+      }
 
-    // Schedule embeddings for all created objects (best-effort, after commit)
-    for (const entityId of entityIds) {
-      await ctx.scheduler.runAfter(0, internal.lib.embedding.embedEntity, { entityId });
-    }
-    for (const factId of factIds) {
-      await ctx.scheduler.runAfter(0, internal.lib.embedding.embedFact, { factId });
-    }
-    for (const triggerId of triggerIds) {
-      await ctx.scheduler.runAfter(0, internal.lib.embedding.embedTrigger, { triggerId });
+      // Persist all data in a single mutation (atomic)
+      const { entityIds, factIds, triggerIds } = await ctx.runMutation(
+        internal.generateWorld._persistWorld,
+        { campaignId: args.campaignId, worldData },
+      );
+
+      // Schedule embeddings for all created objects (best-effort, after commit)
+      for (const entityId of entityIds) {
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedEntity, { entityId });
+      }
+      for (const factId of factIds) {
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedFact, { factId });
+      }
+      for (const triggerId of triggerIds) {
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedTrigger, { triggerId });
+      }
+    } catch (err) {
+      await ctx.runMutation(internal.generateWorld._setSetupStatus, {
+        campaignId: args.campaignId,
+        setupStatus: "draft",
+      });
+      throw err;
     }
   },
 });

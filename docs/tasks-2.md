@@ -195,13 +195,13 @@ Modelos open-source podem emitir tool calls com argumentos JSON inválidos ou no
 
 A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é setado corretamente em todos os pontos do ciclo de vida.
 
-- [ ] Verificar schema: `setupStatus: v.optional(v.union(v.literal("draft"), v.literal("generating"), v.literal("ready")))` em `campaigns` — adicionar se ausente
-- [ ] `campaigns.createCampaign` define `setupStatus: "draft"` ao criar
-- [ ] `generateWorld` muda para `"generating"` ao iniciar e `"ready"` ao concluir com sucesso
-- [ ] `generateWorld` reverte para `"draft"` em caso de falha (não deixa em `"generating"` órfão)
-- [ ] `processTurnFull` rejeita turnos quando `setupStatus !== "ready"` (retorna `{ success: false, reason: "campaign_not_ready" }`)
-- [ ] Testar transições: draft → generating → ready
-- [ ] Testar que falha de LLM em `generateWorld` reverte para `draft` corretamente
+- [x] Verificar schema: `setupStatus: v.optional(v.union(v.literal("draft"), v.literal("generating"), v.literal("ready")))` em `campaigns` — adicionar se ausente
+- [x] `campaigns.createCampaign` define `setupStatus: "draft"` ao criar
+- [x] `generateWorld` muda para `"generating"` ao iniciar e `"ready"` ao concluir com sucesso
+- [x] `generateWorld` reverte para `"draft"` em caso de falha (não deixa em `"generating"` órfão)
+- [x] `processTurnFull` rejeita turnos quando `setupStatus !== "ready"` (retorna `{ success: false, reason: "campaign_not_ready" }`)
+- [x] Testar transições: draft → generating → ready
+- [x] Testar que falha de LLM em `generateWorld` reverte para `draft` corretamente
 
 ### Geração de Personagem Persistindo na Campanha — G-115
 

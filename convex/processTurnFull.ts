@@ -145,6 +145,9 @@ export const processTurnFull = internalAction({
     if (!campaign) {
       return { success: false, reason: "campaign_not_found" };
     }
+    if (campaign.setupStatus !== undefined && campaign.setupStatus !== "ready") {
+      return { success: false, reason: "campaign_not_ready" };
+    }
 
     // --- BYOK: resolver chave OpenRouter antes de qualquer chamada LLM ---
     let openRouterApiKey: string;

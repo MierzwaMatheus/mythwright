@@ -330,6 +330,68 @@ describe("generateWorld", () => {
     });
   });
 
+  it("transição setupStatus: draft → generating → ready em fluxo de sucesso", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify(mockWorldResponse) } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await t.action(internal.generateWorld.generateWorld, { campaignId });
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId as Id<"campaigns">);
+      expect(campaign!.setupStatus).toBe("ready");
+    });
+  });
+
+  it("reverte setupStatus para 'draft' quando HTTP falha (ok: false)", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await expect(
+      t.action(internal.generateWorld.generateWorld, { campaignId }),
+    ).rejects.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId as Id<"campaigns">);
+      expect(campaign!.setupStatus).toBe("draft");
+    });
+  });
+
+  it("reverte setupStatus para 'draft' quando parse de JSON falha (conteúdo inválido)", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await t.run(setupCampaign);
+
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "not valid json at all" } }],
+      }),
+    });
+    vi.stubGlobal("fetch", fakeFetch);
+
+    await expect(
+      t.action(internal.generateWorld.generateWorld, { campaignId }),
+    ).rejects.toThrow();
+
+    await t.run(async (ctx) => {
+      const campaign = await ctx.db.get(campaignId as Id<"campaigns">);
+      expect(campaign!.setupStatus).toBe("draft");
+    });
+  });
+
   it("agenda embeddings para entidades, fatos e gatilhos criados", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await t.run(setupCampaign);
