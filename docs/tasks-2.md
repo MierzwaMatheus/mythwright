@@ -212,11 +212,11 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 2. Aspectos seguem estrutura FATE Condensed (Conceito Alto + Tribulação + 3 outros)
 3. Stress tracks são inicializados com tamanho correto (3 caixas físicas, 3 mentais por padrão; estendido se Vigor/Vontade ≥ +3)
 
-- [ ] Auditar `generateCharacter.ts`: verificar se chama `characters.createCharacter` ao final ou se apenas retorna o objeto parseado
-- [ ] Se não persiste: adicionar passo de persistência via mutation interna
-- [ ] Validar estrutura mínima do output: `aspects.length >= 5`, `skills` com pelo menos 5 entries, `fatePoints: 3` (default), `stress.physical.length >= 3`, `stress.mental.length >= 3`
-- [ ] Estender `stress.physical` para 4 caixas se `skills.Vigor >= 3`; mesmo para mental com Vontade
-- [ ] Testar que `generateCharacter` cria registro em `characters` com todos os campos válidos
+- [x] Auditar `generateCharacter.ts`: verificar se chama `characters.createCharacter` ao final ou se apenas retorna o objeto parseado
+- [x] Se não persiste: adicionar passo de persistência via mutation interna
+- [x] Validar estrutura mínima do output: `aspects.length >= 5`, `skills` com pelo menos 5 entries, `fatePoints: 3` (default), `stress.physical.length >= 3`, `stress.mental.length >= 3`
+- [x] Estender `stress.physical` para 4 caixas se `skills.Vigor >= 3`; mesmo para mental com Vontade
+- [x] Testar que `generateCharacter` cria registro em `characters` com todos os campos válidos
 
 ### Idempotência da Geração de Mundo — G-116
 

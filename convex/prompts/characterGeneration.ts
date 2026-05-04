@@ -145,6 +145,9 @@ export function parseCharacterGenerationResponse(
     )
       return null;
 
+    if (parsed.stress.physical.length < 3) return null;
+    if (parsed.stress.mental.length < 3) return null;
+
     return parsed as CharacterGenerationOutput;
   } catch {
     return null;
