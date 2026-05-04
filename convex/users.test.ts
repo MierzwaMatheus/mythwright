@@ -164,6 +164,58 @@ describe("users.getMyOpenRouterKey", () => {
   });
 });
 
+// G-109: Convex Auth Provider (Password)
+describe("getAuthenticatedUser (via lib/auth)", () => {
+  it("retorna o usuario correto quando identidade esta mockada", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|auth01", email: "knight@mythwright.com" });
+
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "Knight" });
+
+    // getMyOpenRouterKey usa ctx.auth.getUserIdentity internamente (mesmo padrao de getAuthenticatedUser)
+    // Aqui testamos que a identidade mockada resulta no usuario correto sendo retornado
+    const result = await identity.query(api.users.getMyOpenRouterKey, {});
+    // Sem chave salva ainda — deve retornar null (nao lancar erro de auth)
+    expect(result).toBeNull();
+
+    // Verificar que o usuario foi encontrado corretamente no DB via token
+    await t.run(async (ctx) => {
+      const user = await ctx.db
+        .query("users")
+        .withIndex("by_token", (q) => q.eq("tokenIdentifier", "token|auth01"))
+        .unique();
+      expect(user).not.toBeNull();
+      expect(user!.email).toBe("knight@mythwright.com");
+      expect(user!.displayName).toBe("Knight");
+    });
+  });
+
+  it("lanca ConvexError quando chamado sem identidade autenticada", async () => {
+    const t = convexTest(schema, modules);
+    // saveOpenRouterKey usa getAuthenticatedUser internamente (ConvexError "Not authenticated")
+    await expect(
+      t.mutation(api.users.saveOpenRouterKey, { key: "sk-or-test" })
+    ).rejects.toThrow("Not authenticated");
+  });
+});
+
+describe("fluxo completo: login → upsertFromAuth → query protegida (G-109)", () => {
+  it("autenticar → upsert → getMyOpenRouterKey retorna chave correta", async () => {
+    const t = convexTest(schema, modules);
+    const identity = t.withIdentity({ tokenIdentifier: "token|auth02", email: "paladin2@mythwright.com" });
+
+    // Passo 1: upsert do usuario autenticado
+    await identity.mutation(api.users.upsertFromAuth, { displayName: "Paladin2" });
+
+    // Passo 2: salvar chave
+    await identity.mutation(api.users.saveOpenRouterKey, { key: "sk-or-full-flow-key" });
+
+    // Passo 3: query protegida retorna a chave decriptada correta
+    const key = await identity.query(api.users.getMyOpenRouterKey, {});
+    expect(key).toBe("sk-or-full-flow-key");
+  });
+});
+
 // G-026: users.list foi removida — era uma query pública sem autenticação que expunha dados de
 // todos os usuários para qualquer chamada externa (bug de segurança). Removida completamente pois
 // não há caso de uso legítimo no MVP que justifique listar usuários sem auth.

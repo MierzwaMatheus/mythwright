@@ -130,12 +130,12 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 `convex/lib/auth.ts:getAuthenticatedUser` espera `ctx.auth.getUserIdentity()`, mas não existe `convex/auth.config.ts`, `convex/auth.ts` (Convex Auth) nem nenhuma configuração de provider. Sem isso, autenticação real não funciona em produção.
 
-- [ ] Decidir provedor de auth: Convex Auth (Password) ou OAuth (Google/GitHub) — decidir e documentar
-- [ ] Criar `convex/auth.config.ts` conforme escolha
-- [ ] Criar `convex/auth.ts` com `convexAuth({ providers: [...] })` (Convex Auth) ou config equivalente
-- [ ] Garantir que `users.upsertFromAuth` é chamado no callback de login (criar user se primeira vez, atualizar `displayName`/`avatar` se já existir)
-- [ ] Testar `getAuthenticatedUser` com identidade mockada
-- [ ] Testar fluxo: login → upsert user → token válido em queries/mutations
+- [x] Decidir provedor de auth: Convex Auth (Password) ou OAuth (Google/GitHub) — decidir e documentar
+- [x] Criar `convex/auth.config.ts` conforme escolha
+- [x] Criar `convex/auth.ts` com `convexAuth({ providers: [...] })` (Convex Auth) ou config equivalente
+- [x] Garantir que `users.upsertFromAuth` é chamado no callback de login (criar user se primeira vez, atualizar `displayName`/`avatar` se já existir)
+- [x] Testar `getAuthenticatedUser` com identidade mockada
+- [x] Testar fluxo: login → upsert user → token válido em queries/mutations
 
 ### Sanitização de `users.list` — G-110
 

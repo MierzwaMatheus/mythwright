@@ -9,6 +9,7 @@
  */
 
 import type * as aspectInvocations from "../aspectInvocations.js";
+import type * as auth from "../auth.js";
 import type * as campaigns from "../campaigns.js";
 import type * as characters from "../characters.js";
 import type * as classifyTriggers from "../classifyTriggers.js";
@@ -19,6 +20,7 @@ import type * as entities from "../entities.js";
 import type * as facts from "../facts.js";
 import type * as generateCharacter from "../generateCharacter.js";
 import type * as generateWorld from "../generateWorld.js";
+import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_contextBuilder from "../lib/contextBuilder.js";
 import type * as lib_crypto from "../lib/crypto.js";
@@ -59,6 +61,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   aspectInvocations: typeof aspectInvocations;
+  auth: typeof auth;
   campaigns: typeof campaigns;
   characters: typeof characters;
   classifyTriggers: typeof classifyTriggers;
@@ -69,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   facts: typeof facts;
   generateCharacter: typeof generateCharacter;
   generateWorld: typeof generateWorld;
+  http: typeof http;
   "lib/auth": typeof lib_auth;
   "lib/contextBuilder": typeof lib_contextBuilder;
   "lib/crypto": typeof lib_crypto;
