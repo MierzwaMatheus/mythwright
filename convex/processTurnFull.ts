@@ -382,12 +382,33 @@ export const processTurnFull = internalAction({
         return { success: true, messageId: gmMessageId };
       }
 
+      // --- ESTÁGIO 5: recuperar hidden facts relevantes para anti-leak ---
+      const gmEmbedding = await ctx.runAction(internal.lib.embedding.generateEmbedding, {
+        text: fullText,
+      });
+      const hiddenFactSearchResults = await vectorSearch(
+        ctx,
+        "facts",
+        "by_embedding",
+        gmEmbedding,
+        { campaignId: args.campaignId },
+        30,
+      );
+      const hiddenFactDocs = await Promise.all(
+        hiddenFactSearchResults.slice(0, 10).map((r) =>
+          ctx.runQuery(internal.facts.getByIdInternal, { factId: r._id as Id<"facts"> })
+        )
+      );
+      const hiddenFacts = hiddenFactDocs
+        .filter((d): d is NonNullable<typeof d> => d !== null && d.visibility === "hidden")
+        .map((d) => ({ id: d._id as string, content: d.content }));
+
       const leakResult = await ctx.runAction(
         internal.prompts.antiLeak.validateAntiLeak,
         {
           messageId: gmMessageId,
           campaignId: args.campaignId,
-          hiddenFacts: [],
+          hiddenFacts,
         }
       );
 

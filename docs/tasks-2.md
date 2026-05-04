@@ -64,11 +64,11 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 `processTurnFull.ts:283` chama `validateAntiLeak` com `hiddenFacts: []` hard-coded. Sem hidden facts no input, a validação não tem base para detectar vazamento real.
 
-- [ ] No Estágio 5 do `processTurnFull`, antes de chamar `validateAntiLeak`:
+- [x] No Estágio 5 do `processTurnFull`, antes de chamar `validateAntiLeak`:
   - Executar `vectorSearch` em `facts` filtrando `visibility = "hidden"`, usando o embedding da mensagem GM gerada (top-K; default 10)
   - Passar essa lista para `validateAntiLeak`
-- [ ] Testar que `validateAntiLeak` recebe hidden facts relevantes (mock de vectorSearch)
-- [ ] Testar regeneração: hidden fact aparece na resposta → validateAntiLeak detecta → regenera
+- [x] Testar que `validateAntiLeak` recebe hidden facts relevantes (mock de vectorSearch)
+- [x] Testar regeneração: hidden fact aparece na resposta → validateAntiLeak detecta → regenera
 
 ### Paralelismo de Estágios 5 e 6 — G-105
 
