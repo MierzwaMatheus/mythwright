@@ -91,12 +91,12 @@ Hoje no `processTurnFull.ts:278-300`, o anti-leak roda primeiro e só depois o `
 
 Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável global do deploy). O PRD especifica BYOK — cada usuário fornece sua chave via `users.saveOpenRouterKey`, que é criptografada. **Nenhum caller descriptografa e usa essa chave.**
 
-- [ ] Criar helper `lib/llmAuth.ts` com `internalAction getDecryptedOpenRouterKey(userId)` que lê `users.encryptedOpenRouterKey` e descriptografa via `lib/crypto.decryptValue`
-- [ ] Refatorar `processTurnFull` para receber o `userId` (ou derivar de `campaign.userId`) e usar `getDecryptedOpenRouterKey` em vez de `process.env`
-- [ ] Refatorar `classifyTriggers`, `summarizeScene`, `summarizeArc`, `generateWorld`, `generateCharacter`, `prompts/antiLeak.validateAntiLeak`, `prompts/factExtraction.extractAndPersistFacts` para receberem a chave descriptografada como parâmetro (em vez de lerem env)
-- [ ] Manter fallback para `process.env.OPENROUTER_API_KEY` apenas em dev/test (controlado por flag explícita ou ausência de chave do usuário)
-- [ ] Testar que turno com chave do usuário usa a chave correta no header `Authorization`
-- [ ] Testar que turno sem chave do usuário falha graciosamente com erro `"openrouter_key_missing"`
+- [x] Criar helper `lib/llmAuth.ts` com `internalAction getDecryptedOpenRouterKey(userId)` que lê `users.encryptedOpenRouterKey` e descriptografa via `lib/crypto.decryptValue`
+- [x] Refatorar `processTurnFull` para receber o `userId` (ou derivar de `campaign.userId`) e usar `getDecryptedOpenRouterKey` em vez de `process.env`
+- [x] Refatorar `classifyTriggers`, `summarizeScene`, `summarizeArc`, `generateWorld`, `generateCharacter`, `prompts/antiLeak.validateAntiLeak`, `prompts/factExtraction.extractAndPersistFacts` para receberem a chave descriptografada como parâmetro (em vez de lerem env)
+- [x] Manter fallback para `process.env.OPENROUTER_API_KEY` apenas em dev/test (controlado por flag explícita ou ausência de chave do usuário)
+- [x] Testar que turno com chave do usuário usa a chave correta no header `Authorization`
+- [x] Testar que turno sem chave do usuário falha graciosamente com erro `"openrouter_key_missing"`
 
 ### Provedor de Embedding Configurável — G-107
 
@@ -106,7 +106,7 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 - [ ] Confirmar provedor: usar OpenRouter (consistência com narrativa/utility) **ou** Together AI (mais barato para embedding) — decidir e documentar em `convex/lib/embedding.ts` no topo do arquivo
 - [ ] Ler modelo de `campaign.llmConfig.embeddingModel` (default `BAAI/bge-m3`) em vez de hard-code
-- [ ] Se provedor for Together: aceitar `TOGETHER_API_KEY` como env ou (futuramente) chave por usuário
+- [ ] Se provedor for Together: aceitar `TOGETHER_API_KEY` como BYOK
 - [ ] Se provedor for OpenRouter: usar a mesma chave do usuário descriptografada (G-106)
 - [ ] Validar que retorno tem dimensão 1024 (compatível com `vectorIndex` do schema); falhar com erro claro se diferente
 

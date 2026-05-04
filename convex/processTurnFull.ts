@@ -6,6 +6,7 @@ import { buildGmSystemPrompt } from "./prompts/gmSystemPrompt";
 import { buildFullContext } from "./lib/contextBuilder";
 import { retrieveSemanticContext } from "./lib/semanticMemory";
 import { vectorSearch } from "./lib/vectorSearch";
+import { resolveOpenRouterKey, OpenRouterKeyMissingError } from "./lib/llmAuth";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -71,6 +72,7 @@ async function* parseStreamingResponse(
 async function callLlm(
   messages: Array<{ role: string; content: string }>,
   model: string,
+  apiKey: string,
   tools?: unknown[]
 ): Promise<ReadableStream<Uint8Array>> {
   const body: Record<string, unknown> = {
@@ -85,7 +87,7 @@ async function callLlm(
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify(body),
@@ -138,6 +140,20 @@ export const processTurnFull = internalAction({
     }
     if (!campaign) {
       return { success: false, reason: "campaign_not_found" };
+    }
+
+    // --- BYOK: resolver chave OpenRouter antes de qualquer chamada LLM ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
     }
 
     const llmConfig = await ctx.runQuery(
@@ -231,6 +247,7 @@ export const processTurnFull = internalAction({
           playerMessage: playerMessage.content,
           sceneSummary,
           candidates,
+          apiKey: openRouterApiKey,
         });
 
         for (const triggerId of classified.activatedIds) {
@@ -273,7 +290,7 @@ export const processTurnFull = internalAction({
       );
 
       // Streaming
-      const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
+      const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
 
       let pendingBuffer = "";
       let fullText = "";
@@ -378,6 +395,7 @@ export const processTurnFull = internalAction({
           await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
             messageId: gmMessageId,
             campaignId: args.campaignId,
+            apiKey: openRouterApiKey,
           });
         } catch {
           await ctx.runMutation(internal.processTurn.markMessageStatus, {
@@ -421,10 +439,12 @@ export const processTurnFull = internalAction({
           messageId: gmMessageId,
           campaignId: args.campaignId,
           hiddenFacts,
+          apiKey: openRouterApiKey,
         }),
         ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
           messageId: gmMessageId,
           campaignId: args.campaignId,
+          apiKey: openRouterApiKey,
         }).then(() => null).catch((e: unknown) => e),
       ]);
 
@@ -456,6 +476,7 @@ export const processTurnFull = internalAction({
           if (msgCount >= SUMMARY_THRESHOLD) {
             await ctx.scheduler.runAfter(0, internal.summarizeScene.summarizeScene, {
               sceneId: activeScene._id,
+              apiKey: openRouterApiKey,
             });
           }
         }
@@ -538,6 +559,20 @@ export const continueAfterCompel = internalAction({
     if (!playerMessage) return { success: false, reason: "player_message_not_found" };
     if (!campaign) return { success: false, reason: "campaign_not_found" };
 
+    // --- BYOK: resolver chave OpenRouter ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
+    }
+
     const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
       campaignId: compel.campaignId,
     });
@@ -557,7 +592,7 @@ export const continueAfterCompel = internalAction({
     ];
 
     // 5. Streaming
-    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
+    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
     let pendingBuffer = "";
     let fullText = "";
     let lastFlushAt = Date.now();
@@ -606,6 +641,7 @@ export const continueAfterCompel = internalAction({
       messageId: args.gmMessageId,
       campaignId: compel.campaignId,
       hiddenFacts: [],
+      apiKey: openRouterApiKey,
     });
 
     if (!leakResult.vazou) {
@@ -613,6 +649,7 @@ export const continueAfterCompel = internalAction({
         await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
           messageId: args.gmMessageId,
           campaignId: compel.campaignId,
+          apiKey: openRouterApiKey,
         });
       } catch {
         await ctx.runMutation(internal.processTurn.markMessageStatus, {

@@ -127,6 +127,7 @@ export const extractAndPersistFacts = internalAction({
   args: {
     messageId: v.id("messages"),
     campaignId: v.id("campaigns"),
+    apiKey: v.optional(v.string()),
   },
   handler: async (ctx, args): Promise<Id<"facts">[]> => {
     const [gmResponse, existingFacts, llmConfig] = await Promise.all([
@@ -136,11 +137,12 @@ export const extractAndPersistFacts = internalAction({
     ]);
 
     const prompt = buildFactExtractionPrompt(gmResponse ?? "", existingFacts);
+    const key = args.apiKey ?? process.env.OPENROUTER_API_KEY;
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${key}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

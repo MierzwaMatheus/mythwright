@@ -144,7 +144,7 @@ export const _persistWorld = internalMutation({
 // ── Action ─────────────────────────────────────────────────────────────────────
 
 export const generateWorld = internalAction({
-  args: { campaignId: v.id("campaigns") },
+  args: { campaignId: v.id("campaigns"), apiKey: v.optional(v.string()) },
   handler: async (ctx, args): Promise<void> => {
     const campaign = await ctx.runQuery(internal.generateWorld._getCampaign, {
       campaignId: args.campaignId,
@@ -164,7 +164,7 @@ export const generateWorld = internalAction({
       freeDescription: "",
     });
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {

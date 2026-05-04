@@ -47,6 +47,7 @@ export const validateAntiLeak = internalAction({
     messageId: v.id("messages"),
     campaignId: v.id("campaigns"),
     hiddenFacts: v.array(v.object({ id: v.string(), content: v.string() })),
+    apiKey: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const [messageContent, llmConfig] = await Promise.all([
@@ -55,11 +56,12 @@ export const validateAntiLeak = internalAction({
     ]);
 
     const prompt = buildAntiLeakPrompt(messageContent ?? "", args.hiddenFacts);
+    const key = args.apiKey ?? process.env.OPENROUTER_API_KEY;
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
-        "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+        "Authorization": `Bearer ${key}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({

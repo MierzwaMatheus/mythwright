@@ -41,7 +41,7 @@ export const _insertArcSummary = internalMutation({
 });
 
 export const summarizeArc = internalAction({
-  args: { campaignId: v.id("campaigns") },
+  args: { campaignId: v.id("campaigns"), apiKey: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const sceneSummaries = await ctx.runQuery(internal.summarizeArc._getSceneSummaries, {
       campaignId: args.campaignId,
@@ -66,7 +66,7 @@ export const summarizeArc = internalAction({
 
     const prompt = buildArcSummarizerPrompt(campaignDoc.premise, sceneSummariesBlock);
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {

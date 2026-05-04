@@ -5,8 +5,8 @@ import { vectorSearch } from "./vectorSearch";
 import { internal } from "../_generated/api";
 
 export type SemanticContext = {
-  facts: Array<{ _id: Id<"facts">; content: string; visibility: string }>;
-  entities: Array<{ _id: Id<"entities">; name: string; description: string; visibility: string; type: string }>;
+  facts: Array<{ _id: Id<"facts">; content: string; visibility: "hidden" | "rumored" | "known" }>;
+  entities: Array<{ _id: Id<"entities">; name: string; description: string; visibility: "hidden" | "rumored" | "known"; type: string }>;
   summaries: Array<{ _id: Id<"summaries">; content: string; level: string }>;
 };
 
@@ -49,12 +49,12 @@ export async function retrieveSemanticContext(
   const facts = factDocs
     .filter((d): d is NonNullable<typeof d> => d !== null)
     .filter((d) => d.visibility === "known" || d.visibility === "rumored")
-    .map((d) => ({ _id: d._id, content: d.content, visibility: d.visibility }));
+    .map((d) => ({ _id: d._id, content: d.content, visibility: d.visibility as "hidden" | "rumored" | "known" }));
 
   const entities = entityDocs
     .filter((d): d is NonNullable<typeof d> => d !== null)
     .filter((d) => d.visibility === "known" || d.visibility === "rumored")
-    .map((d) => ({ _id: d._id, name: d.name, description: d.description, visibility: d.visibility, type: d.type }));
+    .map((d) => ({ _id: d._id, name: d.name, description: d.description, visibility: d.visibility as "hidden" | "rumored" | "known", type: d.type }));
 
   const summaries = summaryDocs
     .filter((d): d is NonNullable<typeof d> => d !== null)

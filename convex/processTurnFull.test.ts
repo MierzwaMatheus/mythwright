@@ -108,7 +108,7 @@ function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe("processTurnFull (HP1 — fluxo básico completo)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP1: fluxo completo → GM criada com causedByMessageId, triggersFired/factsRevealed/tokensUsed persistidos, status 'complete'", async () => {
@@ -150,7 +150,7 @@ describe("processTurnFull (HP1 — fluxo básico completo)", () => {
 });
 
 describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP3: antileak detecta vazamento na 1ª tentativa → mensagem leaked → 2ª passa → status 'complete'", async () => {
@@ -196,7 +196,7 @@ describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
 });
 
 describe("processTurnFull (HP5 — sem gatilhos)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP5: sem candidateTriggers → classifyTriggers não chamado → fluxo normal com status 'complete'", async () => {
@@ -270,7 +270,7 @@ describe("processTurnFull (HP5 — sem gatilhos)", () => {
 });
 
 describe("processTurnFull (HP4 — threshold de resumo)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP4: 20+ mensagens na cena → summarizeScene agendado no scheduler", async () => {
@@ -334,7 +334,7 @@ describe("processTurnFull (HP4 — threshold de resumo)", () => {
 });
 
 describe("processTurnFull (G-018 — idempotência)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP2: chamar processTurnFull duas vezes com mesmo playerMessageId → retorna mesmo gmMessageId sem criar segunda mensagem GM", async () => {
@@ -390,7 +390,7 @@ describe("processTurnFull (G-018 — idempotência)", () => {
 });
 
 describe("processTurnFull (G-101 — embedding GM agendado)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("G-101: após Estágio 7, embedMessage é agendado para a mensagem GM", async () => {
@@ -429,7 +429,7 @@ describe("processTurnFull (G-101 — embedding GM agendado)", () => {
 });
 
 describe("processTurnFull (G-102 — contexto semântico no LLM)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("G-102: payload enviado ao LLM contém mais de [system, user] — inclui contexto do personagem e cena", async () => {
@@ -494,7 +494,7 @@ describe("processTurnFull (G-102 — contexto semântico no LLM)", () => {
 });
 
 describe("processTurnFull (G-103 — integração de triggers)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   async function setupWithTrigger(
@@ -652,7 +652,7 @@ describe("processTurnFull (G-103 — integração de triggers)", () => {
 });
 
 describe("processTurnFull (G-104 — anti-leak com hidden facts)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   async function setupWithHiddenFact(t: ReturnType<typeof convexTest>) {
@@ -761,7 +761,7 @@ describe("processTurnFull (G-104 — anti-leak com hidden facts)", () => {
 });
 
 describe("processTurnFull (G-105 — paralelismo estágios 5 e 6)", () => {
-  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
   afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
   async function setupBasic(t: ReturnType<typeof convexTest>) {

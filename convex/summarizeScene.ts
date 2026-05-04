@@ -21,7 +21,7 @@ export const _getSceneWithMessages = internalQuery({
 });
 
 export const summarizeScene = internalAction({
-  args: { sceneId: v.id("scenes") },
+  args: { sceneId: v.id("scenes"), apiKey: v.optional(v.string()) },
   handler: async (ctx, args) => {
     const data = await ctx.runQuery(internal.summarizeScene._getSceneWithMessages, {
       sceneId: args.sceneId,
@@ -48,7 +48,7 @@ export const summarizeScene = internalAction({
       messagesBlock,
     );
 
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = args.apiKey ?? process.env.OPENROUTER_API_KEY;
     const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
       headers: {
