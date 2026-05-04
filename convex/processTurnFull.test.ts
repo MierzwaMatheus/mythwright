@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { internal } from "./_generated/api";
 import schema from "./schema";
 
@@ -28,6 +28,16 @@ async function setupCampaign(t: ReturnType<typeof convexTest>) {
   });
 }
 
+// Resposta de embedding (Together AI)
+function makeEmbeddingResponse() {
+  return {
+    ok: true,
+    json: async () => ({
+      data: [{ embedding: Array.from({ length: 1024 }, (_, i) => i * 0.001) }],
+    }),
+  };
+}
+
 // Helper para criar SSE stream a partir de chunks de texto
 function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder();
@@ -47,9 +57,8 @@ function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
 }
 
 describe("processTurnFull (HP1 — fluxo básico completo)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP1: fluxo completo → GM criada com causedByMessageId, triggersFired/factsRevealed/tokensUsed persistidos, status 'complete'", async () => {
     const t = convexTest(schema, modules);
@@ -70,8 +79,10 @@ describe("processTurnFull (HP1 — fluxo básico completo)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        return { ok: true, body: makeSseStream(["O castelo ao norte brilha."]) };
+        return makeEmbeddingResponse();
       } else if (callCount === 2) {
+        return { ok: true, body: makeSseStream(["O castelo ao norte brilha."]) };
+      } else if (callCount === 3) {
         return {
           ok: true,
           json: async () => ({
@@ -110,9 +121,8 @@ describe("processTurnFull (HP1 — fluxo básico completo)", () => {
 });
 
 describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP3: antileak detecta vazamento na 1ª tentativa → mensagem leaked → 2ª passa → status 'complete'", async () => {
     const t = convexTest(schema, modules);
@@ -132,17 +142,19 @@ describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
-      // Seq: LLM(1), antiLeak-vaza(2), LLM(3), antiLeak-ok(4), factExtraction(5)
-      if (callCount === 1 || callCount === 3) {
+      // Seq: embedding(1), LLM(2), antiLeak-vaza(3), LLM(4), antiLeak-ok(5), factExtraction(6)
+      if (callCount === 1) {
+        return makeEmbeddingResponse();
+      } else if (callCount === 2 || callCount === 4) {
         return { ok: true, body: makeSseStream(["Resposta do GM."]) };
-      } else if (callCount === 2) {
+      } else if (callCount === 3) {
         return {
           ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: true, facts: ["f1"], trechos: ["t"] }) } }],
           }),
         };
-      } else if (callCount === 4) {
+      } else if (callCount === 5) {
         return {
           ok: true,
           json: async () => ({
@@ -185,9 +197,8 @@ describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
 });
 
 describe("processTurnFull (HP5 — sem gatilhos)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP5: sem candidateTriggers → classifyTriggers não chamado → fluxo normal com status 'complete'", async () => {
     const t = convexTest(schema, modules);
@@ -215,29 +226,36 @@ describe("processTurnFull (HP5 — sem gatilhos)", () => {
     });
 
     let classifyCallMade = false;
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string) => {
-      callCount++;
+    let narrativeCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
       if (typeof url === "string" && url.includes("trigger")) {
         classifyCallMade = true;
       }
-      if (callCount === 1) {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      // OpenRouter
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        narrativeCallCount++;
         return { ok: true, body: makeSseStream(["Você vê a floresta silenciosa."]) };
-      } else if (callCount === 2) {
+      }
+      // Anti-leak ou fact extraction
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("anti") || prompt.includes("leak")) {
         return {
           ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
         };
-      } else {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
       }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
     }));
 
     const result = await t.action(internal.processTurnFull.processTurnFull, {
@@ -253,9 +271,8 @@ describe("processTurnFull (HP5 — sem gatilhos)", () => {
 });
 
 describe("processTurnFull (HP4 — threshold de resumo)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP4: 20+ mensagens na cena → summarizeScene agendado no scheduler", async () => {
     const t = convexTest(schema, modules);
@@ -296,23 +313,14 @@ describe("processTurnFull (HP4 — threshold de resumo)", () => {
       });
     });
 
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      return {
-        ok: true,
-        json: async () => ({
-          choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-        }),
-        body: makeSseStream(["OK."]),
-      };
-    }));
-
-    // Mock fetch para retornar coisas certas baseado na ordem
     let callCount = 0;
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        return { ok: true, body: makeSseStream(["Resposta."]) };
+        return makeEmbeddingResponse();
       } else if (callCount === 2) {
+        return { ok: true, body: makeSseStream(["Resposta."]) };
+      } else if (callCount === 3) {
         return {
           ok: true,
           json: async () => ({
@@ -349,9 +357,8 @@ describe("processTurnFull (HP4 — threshold de resumo)", () => {
 });
 
 describe("processTurnFull (G-018 — idempotência)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("HP2: chamar processTurnFull duas vezes com mesmo playerMessageId → retorna mesmo gmMessageId sem criar segunda mensagem GM", async () => {
     const t = convexTest(schema, modules);
@@ -373,9 +380,12 @@ describe("processTurnFull (G-018 — idempotência)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        // LLM streaming — 1ª chamada
-        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+        // embedding
+        return makeEmbeddingResponse();
       } else if (callCount === 2) {
+        // LLM streaming
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      } else if (callCount === 3) {
         // antiLeak — não vazou
         return {
           ok: true,
@@ -429,9 +439,8 @@ describe("processTurnFull (G-018 — idempotência)", () => {
 });
 
 describe("processTurnFull (G-101 — embedding GM agendado)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
   it("G-101: após Estágio 7, embedMessage é agendado para a mensagem GM", async () => {
     const t = convexTest(schema, modules);
@@ -452,8 +461,10 @@ describe("processTurnFull (G-101 — embedding GM agendado)", () => {
     vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
       callCount++;
       if (callCount === 1) {
-        return { ok: true, body: makeSseStream(["Você vê uma floresta densa."]) };
+        return makeEmbeddingResponse();
       } else if (callCount === 2) {
+        return { ok: true, body: makeSseStream(["Você vê uma floresta densa."]) };
+      } else if (callCount === 3) {
         return {
           ok: true,
           json: async () => ({
@@ -485,5 +496,91 @@ describe("processTurnFull (G-101 — embedding GM agendado)", () => {
       );
       expect(embedScheduled).toBe(true);
     });
+  });
+});
+
+describe("processTurnFull (G-102 — contexto semântico no LLM)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("G-102: payload enviado ao LLM contém mais de [system, user] — inclui contexto do personagem e cena", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    // Cena ativa e personagem
+    await t.run(async (ctx) => {
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "A Taverna do Cervo",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      await ctx.db.insert("characters", {
+        campaignId,
+        name: "Lyra",
+        aspects: ["Ladrã arrependida"],
+        skills: { Fight: 3 },
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false] },
+        consequences: [],
+      });
+    });
+
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Examino a sala em busca de saídas.",
+        clientMessageId: "player-g102",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
+
+    let capturedPayload: any = null;
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      callCount++;
+      if (callCount === 1) {
+        return makeEmbeddingResponse();
+      } else if (callCount === 2) {
+        // Captura o payload enviado ao LLM narrativo
+        capturedPayload = JSON.parse(opts.body);
+        return { ok: true, body: makeSseStream(["Você avista três portas."]) };
+      } else if (callCount === 3) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      } else {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      }
+    }));
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(capturedPayload).not.toBeNull();
+
+    const messages: Array<{ role: string; content: string }> = capturedPayload.messages;
+    // Deve haver mais de 2 mensagens (não só [system, user])
+    expect(messages.length).toBeGreaterThan(2);
+    // Deve conter bloco do personagem (aspects)
+    const allContent = messages.map((m) => m.content).join(" ");
+    expect(allContent).toContain("Ladrã arrependida");
+    // Última mensagem deve ser do user
+    expect(messages[messages.length - 1].role).toBe("user");
   });
 });

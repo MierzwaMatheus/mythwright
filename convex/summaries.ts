@@ -32,6 +32,13 @@ export const listByCampaignLevelInternal = internalQuery({
   },
 });
 
+export const getByIdInternal = internalQuery({
+  args: { summaryId: v.id("summaries") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.summaryId);
+  },
+});
+
 export const setSummaryEmbedding = internalMutation({
   args: {
     summaryId: v.id("summaries"),

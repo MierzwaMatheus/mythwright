@@ -94,6 +94,13 @@ export const createFactInternal = internalMutation({
   },
 });
 
+export const getByIdInternal = internalQuery({
+  args: { factId: v.id("facts") },
+  handler: async (ctx, args) => {
+    return await ctx.db.get(args.factId);
+  },
+});
+
 export const getFactsByCampaignInternal = internalQuery({
   args: { campaignId: v.id("campaigns") },
   handler: async (ctx, args) => {

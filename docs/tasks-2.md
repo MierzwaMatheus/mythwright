@@ -27,19 +27,19 @@ Pré-condição: `tasks.md` (parte 1) totalmente concluído. As tasks abaixo cob
 
 Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem histórico, sem ficha, sem fatos recuperados, sem cena. A função `buildFullContext` existe e é testada, mas **nunca é chamada**. As tabelas `entities`, `facts`, `summaries` têm vectorIndex prontos mas nenhum caller os consulta.
 
-- [ ] Criar helper `lib/semanticMemory.ts` com `retrieveSemanticContext(ctx, { campaignId, sceneId, queryEmbedding, limits })` que executa em paralelo:
+- [x] Criar helper `lib/semanticMemory.ts` com `retrieveSemanticContext(ctx, { campaignId, sceneId, queryEmbedding, limits })` que executa em paralelo:
   - `vectorSearch` em `facts` filtrando `visibility ∈ {known, rumored}` (top-K conforme PRD; default 5)
   - `vectorSearch` em `entities` filtrando `visibility ∈ {known, rumored}` (top-K; default 5)
   - `vectorSearch` em `summaries` filtrando `level ∈ {scene, arc}` (top-K; default 3)
-- [ ] No Estágio 2 do `processTurnFull`:
+- [x] No Estágio 2 do `processTurnFull`:
   - Aguardar embedding da mensagem do jogador (chamar `generateEmbedding` síncrono — não esperar scheduler)
   - Chamar `retrieveSemanticContext` com esse embedding
   - Buscar `character` ativo da campanha
   - Buscar últimas N mensagens da cena (janela curta — usar `messages.getMessagesByScene`)
   - Buscar `sceneAspects` da cena ativa
   - Chamar `buildFullContext` com tudo isso e usar como `messages` enviadas ao LLM (em vez de só system + user crus)
-- [ ] Testar `retrieveSemanticContext` com mock de embedding e dados seeds
-- [ ] Testar que `processTurnFull` envia ao LLM um array de mensagens com histórico e contexto semântico (verificar payload com mock)
+- [x] Testar `retrieveSemanticContext` com mock de embedding e dados seeds
+- [x] Testar que `processTurnFull` envia ao LLM um array de mensagens com histórico e contexto semântico (verificar payload com mock)
 
 ### Integração de Gatilhos no Loop — G-103
 

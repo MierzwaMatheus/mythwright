@@ -84,16 +84,24 @@ async function setupBase(t: ReturnType<typeof convexTest>) {
 
 describe("processTurnFull — compel_aspect persiste triggeringMessageId e pausedGmMessageId", () => {
   beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
     vi.stubGlobal("fetch", vi.fn());
   });
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it("compel no banco tem triggeringMessageId e pausedGmMessageId após awaiting_player_decision", async () => {
     const t = convexTest(schema, modules);
     const { campaignId, aspectId, characterId, playerMessageId } = await setupBase(t);
 
+    // 1ª chamada: embedding (Together AI)
+    (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ data: [{ embedding: Array.from({ length: 1024 }, (_, i) => i * 0.001) }] }),
+    });
+    // 2ª chamada: narrative LLM com compel_aspect tool call
     (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
       ok: true,
       body: compelAspectStream(aspectId, characterId),

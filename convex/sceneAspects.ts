@@ -1,6 +1,16 @@
 import { ConvexError, v } from "convex/values";
-import { mutation } from "./_generated/server";
+import { mutation, internalQuery } from "./_generated/server";
 import { getAuthenticatedUser } from "./lib/auth";
+
+export const getBySceneInternal = internalQuery({
+  args: { sceneId: v.id("scenes") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("sceneAspects")
+      .withIndex("by_scene", (q) => q.eq("sceneId", args.sceneId))
+      .collect();
+  },
+});
 
 export const addSceneAspect = mutation({
   args: {

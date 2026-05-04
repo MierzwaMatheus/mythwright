@@ -3,6 +3,8 @@ import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 import { buildGmSystemPrompt } from "./prompts/gmSystemPrompt";
+import { buildFullContext } from "./lib/contextBuilder";
+import { retrieveSemanticContext } from "./lib/semanticMemory";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -147,6 +149,56 @@ export const processTurnFull = internalAction({
       premise: campaign.premise,
     });
 
+    // --- ESTÁGIO 2: montagem do contexto semântico ---
+    const queryEmbedding = await ctx.runAction(
+      internal.lib.embedding.generateEmbedding,
+      { text: playerMessage.content }
+    );
+
+    const [semanticCtx, character, recentMessages, sceneAspects] = await Promise.all([
+      retrieveSemanticContext(ctx, { campaignId: args.campaignId, queryEmbedding }),
+      ctx.runQuery(internal.characters.getByCampaignIdInternal, { campaignId: args.campaignId }),
+      activeScene
+        ? ctx.runQuery(internal.messages.getRecentBySceneInternal, { sceneId: activeScene._id, limit: 10 })
+        : Promise.resolve([]),
+      activeScene
+        ? ctx.runQuery(internal.sceneAspects.getBySceneInternal, { sceneId: activeScene._id })
+        : Promise.resolve([]),
+    ]);
+
+    const campaignForContext = { name: campaign.name, systemPrompt };
+    const sceneForContext = activeScene
+      ? { title: activeScene.title, description: activeScene.description, status: activeScene.status }
+      : { title: "Sem cena ativa", status: "inactive" as const };
+    const messagesForContext = [...recentMessages].reverse().map((m) => ({
+      role: m.role === "gm" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+      status: m.status === "failed" ? ("failed" as const) : ("ok" as const),
+    }));
+    messagesForContext.push({ role: "user" as const, content: playerMessage.content, status: "ok" as const });
+
+    const characterForContext = character ?? {
+      name: "Desconhecido",
+      aspects: [],
+      skills: {},
+      stunts: [],
+      fatePoints: 3,
+      stress: { physical: [false, false, false], mental: [false, false, false] },
+      consequences: [],
+    };
+
+    const aspectEvents = sceneAspects.map((a) => ({ name: a.text, description: `${a.freeInvokes} invocações livres` }));
+
+    const llmMessages = buildFullContext(
+      campaignForContext,
+      characterForContext,
+      sceneForContext,
+      messagesForContext,
+      semanticCtx.facts,
+      semanticCtx.summaries,
+      aspectEvents,
+    );
+
     // --- LOOP DE REGENERAÇÃO ---
     for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
       // Criar stub de mensagem GM com causedByMessageId
@@ -158,12 +210,6 @@ export const processTurnFull = internalAction({
           ...(activeScene ? { sceneId: activeScene._id } : {}),
         }
       );
-
-      // Montar mensagens para LLM
-      const llmMessages: Array<{ role: string; content: string }> = [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: playerMessage.content },
-      ];
 
       // Streaming
       const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel);
