@@ -143,8 +143,8 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 A task original pedia "remover ou restringir a admin a query `users.list`". Confirmar que foi feita corretamente — não basta marcar como `[x]` se a função ainda expõe todos os usuários sem checagem.
 
-- [ ] Verificar `convex/users.ts` linha original (~88-95): a query `list` deve estar (a) removida, (b) restrita por flag `user.isAdmin` no schema, ou (c) limitada a retornar apenas o próprio usuário autenticado
-- [ ] Adicionar teste que confirma comportamento atual (impossível listar outros usuários sem flag de admin)
+- [x] Verificar `convex/users.ts` linha original (~88-95): a query `list` deve estar (a) removida, (b) restrita por flag `user.isAdmin` no schema, ou (c) limitada a retornar apenas o próprio usuário autenticado
+- [x] Adicionar teste que confirma comportamento atual (impossível listar outros usuários sem flag de admin)
 
 ---
 

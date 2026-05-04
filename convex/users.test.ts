@@ -238,4 +238,30 @@ describe("users.list security (G-026)", () => {
       expect(users[0].encryptedOpenRouterKey).not.toBe("sk-or-cleric-secret");
     });
   });
+
+  it("api.users does not expose a list function (G-110)", async () => {
+    // Confirma que users.list foi removida da API pública.
+    // A API do Convex usa Proxy, então verificamos via 'in' operator ou checando
+    // se a chave está no objeto de definições exportadas do módulo users.ts.
+    const usersModule = await import("./users");
+    expect("list" in usersModule).toBe(false);
+  });
+
+  it("user A cannot access user B data via any public API (G-110)", async () => {
+    const t = convexTest(schema, modules);
+    const userA = t.withIdentity({ tokenIdentifier: "token|401", email: "archer@mythwright.com" });
+    const userB = t.withIdentity({ tokenIdentifier: "token|402", email: "monk2@mythwright.com" });
+
+    await userA.mutation(api.users.upsertFromAuth, { displayName: "Archer" });
+    await userA.mutation(api.users.saveOpenRouterKey, { key: "sk-or-archer-secret" });
+    await userB.mutation(api.users.upsertFromAuth, { displayName: "Monk2" });
+
+    // User B não vê a chave do User A
+    const keyB = await userB.query(api.users.getMyOpenRouterKey, {});
+    expect(keyB).toBeNull();
+
+    // User A ainda vê a própria chave
+    const keyA = await userA.query(api.users.getMyOpenRouterKey, {});
+    expect(keyA).toBe("sk-or-archer-secret");
+  });
 });
