@@ -584,3 +584,201 @@ describe("processTurnFull (G-102 — contexto semântico no LLM)", () => {
     expect(messages[messages.length - 1].role).toBe("user");
   });
 });
+
+describe("processTurnFull (G-103 — integração de triggers)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  async function setupWithTrigger(
+    t: ReturnType<typeof convexTest>,
+    oneShot: boolean,
+  ) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "trigger@test.com",
+        displayName: "Trigger Tester",
+        tokenIdentifier: "token|trigger-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "Trigger Campaign",
+        premise: "Testes de gatilho.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const dummyEmbedding = Array.from({ length: 1024 }, (_, i) => i * 0.001);
+      const factId = await ctx.db.insert("facts", {
+        campaignId,
+        content: "O rei está morto.",
+        visibility: "hidden",
+        embedding: dummyEmbedding,
+        createdAt: Date.now(),
+      });
+      const triggerId = await ctx.db.insert("triggers", {
+        campaignId,
+        description: "Revelar morte do rei quando jogador perguntar sobre o castelo",
+        scope: "global",
+        status: "armed",
+        oneShot,
+        embedding: dummyEmbedding,
+        effects: [{ type: "change_fact_visibility", payload: { factId, visibility: "known" } }],
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que acontece no castelo?",
+        clientMessageId: "player-trigger-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, factId, triggerId, playerMessageId };
+    });
+  }
+
+  function makeClassifyResponse(activatedIds: string[]) {
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ ativados: activatedIds }) } }],
+      }),
+    };
+  }
+
+  it("G-103a: trigger relevante ativa → efeito executado antes da resposta do GM → triggersFired e factsRevealed persistidos", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, factId, triggerId, playerMessageId } = await setupWithTrigger(t, true);
+
+    let classifyCalled = false;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      // Together AI → embedding
+      if (typeof _url === "string" && _url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      // stream=true → LLM narrativo
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["O rei caiu."]) };
+      }
+      // classify triggers → sem stream e tem "candidates" no prompt ou response_format json_object sem "vazou"
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("ativados") || prompt.includes("trigger") || prompt.includes("Revelar morte")) {
+        classifyCalled = true;
+        return makeClassifyResponse([triggerId]);
+      }
+      // antiLeak
+      if (prompt.includes("vazou") || (body.response_format && prompt.includes("trechos"))) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      // factExtraction
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const gmMsg = await ctx.db.get(messageId as any);
+      expect((gmMsg as any)!.triggersFired).toContain(triggerId);
+      expect((gmMsg as any)!.factsRevealed).toContain(factId);
+
+      // Fato deve estar visível agora
+      const fact = await ctx.db.get(factId as any);
+      expect((fact as any)!.visibility).toBe("known");
+    });
+  });
+
+  it("G-103b: trigger oneShot: true → status vira 'fired' e não pode disparar novamente", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, triggerId, playerMessageId } = await setupWithTrigger(t, true);
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) return makeEmbeddingResponse();
+      if (callCount === 2) return makeClassifyResponse([triggerId]);
+      if (callCount === 3) return { ok: true, body: makeSseStream(["Resposta."]) };
+      if (callCount === 4) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as any);
+      expect((trigger as any)!.status).toBe("fired");
+    });
+  });
+
+  it("G-103c: trigger oneShot: false → permanece 'armed' após disparar", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, triggerId, playerMessageId } = await setupWithTrigger(t, false);
+
+    let callCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
+      callCount++;
+      if (callCount === 1) return makeEmbeddingResponse();
+      if (callCount === 2) return makeClassifyResponse([triggerId]);
+      if (callCount === 3) return { ok: true, body: makeSseStream(["Resposta."]) };
+      if (callCount === 4) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as any);
+      expect((trigger as any)!.status).toBe("armed");
+    });
+  });
+});

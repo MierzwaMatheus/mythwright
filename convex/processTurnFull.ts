@@ -5,6 +5,7 @@ import { Id } from "./_generated/dataModel";
 import { buildGmSystemPrompt } from "./prompts/gmSystemPrompt";
 import { buildFullContext } from "./lib/contextBuilder";
 import { retrieveSemanticContext } from "./lib/semanticMemory";
+import { vectorSearch } from "./lib/vectorSearch";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const MAX_REGENERATIONS = 2;
@@ -189,6 +190,66 @@ export const processTurnFull = internalAction({
 
     const aspectEvents = sceneAspects.map((a) => ({ name: a.text, description: `${a.freeInvokes} invocações livres` }));
 
+    // --- ESTÁGIO 3: classificação e disparo de triggers ---
+    const triggersFired: Id<"triggers">[] = [];
+    const factsRevealedFromTriggers: Id<"facts">[] = [];
+    const triggeredEventDescriptions: Array<{ name: string; description: string }> = [];
+
+    const armedTriggers = await ctx.runQuery(api.triggers.getArmedTriggersByScope, {
+      campaignId: args.campaignId,
+      sceneId: activeScene?._id,
+    });
+
+    if (armedTriggers.length > 0) {
+      const triggerSearchResults = await vectorSearch(
+        ctx,
+        "triggers",
+        "by_embedding",
+        queryEmbedding,
+        { campaignId: args.campaignId },
+        armedTriggers.length * 2,
+      );
+
+      const armedIdSet = new Set(armedTriggers.map((t) => t._id as string));
+      const ranked = triggerSearchResults.filter((r) => armedIdSet.has(r._id));
+
+      // Fallback para pré-filtro quando nenhum trigger tem embedding ainda
+      const topK = ranked.length > 0 ? ranked.slice(0, 5) : armedTriggers.slice(0, 5).map((t) => ({ _id: t._id as string, _score: 1 }));
+
+      const candidates = topK.map((r) => {
+        const trigger = armedTriggers.find((t) => (t._id as string) === r._id)!;
+        return { id: r._id, description: trigger.description, scope: trigger.scope };
+      });
+
+      if (candidates.length > 0) {
+        const sceneSummary = activeScene
+          ? `${activeScene.title}: ${activeScene.description ?? ""}`
+          : "";
+
+        const classified = await ctx.runAction(internal.classifyTriggers.classifyTriggers, {
+          campaignId: args.campaignId,
+          playerMessage: playerMessage.content,
+          sceneSummary,
+          candidates,
+        });
+
+        for (const triggerId of classified.activatedIds) {
+          const result = await ctx.runMutation(internal.triggers.fireTrigger, {
+            triggerId: triggerId as Id<"triggers">,
+            firedByMessageId: args.playerMessageId,
+          });
+          triggersFired.push(triggerId as Id<"triggers">);
+          factsRevealedFromTriggers.push(...result.revealedFactIds);
+          const trigger = armedTriggers.find((t) => (t._id as string) === triggerId);
+          if (trigger) {
+            triggeredEventDescriptions.push({ name: trigger.description, description: "trigger disparado" });
+          }
+        }
+      }
+    }
+
+    const firedEvents = [...aspectEvents, ...triggeredEventDescriptions];
+
     const llmMessages = buildFullContext(
       campaignForContext,
       characterForContext,
@@ -196,7 +257,7 @@ export const processTurnFull = internalAction({
       messagesForContext,
       semanticCtx.facts,
       semanticCtx.summaries,
-      aspectEvents,
+      firedEvents,
     );
 
     // --- LOOP DE REGENERAÇÃO ---
@@ -315,8 +376,8 @@ export const processTurnFull = internalAction({
       if (!antiLeakEnabled) {
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
           gmMessageId,
-          triggersFired: [],
-          factsRevealed: [],
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
         });
         return { success: true, messageId: gmMessageId };
       }
@@ -348,8 +409,8 @@ export const processTurnFull = internalAction({
         // Estágio 7: housekeeping
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
           gmMessageId,
-          triggersFired: [],
-          factsRevealed: [],
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
         });
 
         await ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId: gmMessageId, content: fullText });

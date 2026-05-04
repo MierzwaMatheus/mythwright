@@ -47,16 +47,16 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 `classifyTriggers` foi implementado e testado isoladamente. **Não é chamado pelo `processTurnFull`.** A pipeline completa de 3 fases (pré-filtro → vectorSearch → LLM classifier) precisa rodar antes do Estágio 4.
 
-- [ ] No Estágio 3 do `processTurnFull`, antes da chamada ao LLM narrativo:
+- [x] No Estágio 3 do `processTurnFull`, antes da chamada ao LLM narrativo:
   - Chamar `triggers.getArmedTriggersByScope` para obter candidatos pré-filtrados (cena ativa + globais)
   - Aplicar `vectorSearch` em `triggers` usando o embedding da mensagem do jogador, filtrando `status = "armed"` e `scope` relevante; combinar resultado com pré-filtro (top-K por similaridade)
   - Chamar `internal.classifyTriggers.classifyTriggers` com a mensagem do jogador e os candidatos
   - Para cada trigger ativado: chamar `triggers.resolveTriggerEffects` (executa efeitos) e adicionar `triggerId` em `triggersFired`
   - Passar resumo dos eventos disparados para `buildFullContext` (já tem o parâmetro `triggeredEvents`) para que o GM tenha consciência do que mudou
-- [ ] Persistir `triggersFired` na mensagem GM no Estágio 7
-- [ ] Testar que mensagem do jogador → trigger relevante ativa → efeito é executado antes da resposta do GM
-- [ ] Testar que trigger `oneShot: true` muda status para `fired` e não dispara novamente
-- [ ] Testar que trigger `oneShot: false` permanece `armed` após disparar
+- [x] Persistir `triggersFired` na mensagem GM no Estágio 7
+- [x] Testar que mensagem do jogador → trigger relevante ativa → efeito é executado antes da resposta do GM
+- [x] Testar que trigger `oneShot: true` muda status para `fired` e não dispara novamente
+- [x] Testar que trigger `oneShot: false` permanece `armed` após disparar
 
 ### Anti-leak com Hidden Facts Recuperados — G-104
 
