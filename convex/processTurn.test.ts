@@ -1,23 +1,74 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { internal } from "./_generated/api";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.ts");
 
+// Mock de fetch roteado por URL/body — evita dependência de callCount
+// Together AI → embedding; OpenRouter stream → SSE narrativo; antiLeak → resposta configurável; else → factExtraction
+function makeRoutedFetch({
+  sseContent = ["Resposta do GM."],
+  antiLeakVazou = false,
+  onLlmCall,
+  classifyActivatedIds,
+}: {
+  sseContent?: string[];
+  antiLeakVazou?: boolean;
+  onLlmCall?: (payload: any) => void;
+  classifyActivatedIds?: string[];
+} = {}) {
+  let antiLeakCount = 0;
+  return vi.fn().mockImplementation(async (url: string, opts: any) => {
+    if (typeof url === "string" && url.includes("together")) {
+      return makeEmbeddingResponse();
+    }
+    const body = opts?.body ? JSON.parse(opts.body) : {};
+    if (body.stream === true) {
+      onLlmCall?.(body);
+      return { ok: true, body: makeSseStream(sseContent) };
+    }
+    const prompt = JSON.stringify(body.messages ?? []);
+    if (prompt.includes("vazou") || prompt.includes("trechos")) {
+      antiLeakCount++;
+      const vazou = antiLeakVazou && antiLeakCount === 1;
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ vazou, facts: [], trechos: [] }) } }],
+        }),
+      };
+    }
+    if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ ativados: classifyActivatedIds ?? [], raciocinio: "" }) } }],
+        }),
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+      }),
+    };
+  });
+}
+
 // Helper: cria user + campaign e retorna os ids
 async function setupCampaign(t: ReturnType<typeof convexTest>) {
   return await t.run(async (ctx) => {
     const userId = await ctx.db.insert("users", {
-      email: "test@test.com",
-      displayName: "Test User",
-      tokenIdentifier: "token|processTurn-" + Math.random(),
+      email: "full@test.com",
+      displayName: "Full Test User",
+      tokenIdentifier: "token|processTurnFull-" + Math.random(),
     });
     const campaignId = await ctx.db.insert("campaigns", {
       userId,
-      name: "Test Campaign",
-      premise: "Uma aventura.",
+      name: "Full Campaign",
+      premise: "Uma aventura completa.",
       tone: "dark",
       expectedDuration: "one-shot",
       status: "active",
@@ -25,6 +76,44 @@ async function setupCampaign(t: ReturnType<typeof convexTest>) {
       lastActivityAt: Date.now(),
     });
     return { userId, campaignId };
+  });
+}
+
+// Resposta de embedding (Together AI)
+function makeEmbeddingResponse() {
+  return {
+    ok: true,
+    json: async () => ({
+      data: [{ embedding: Array.from({ length: 1024 }, (_, i) => i * 0.001) }],
+    }),
+  };
+}
+
+// Helper para criar SSE stream com um tool call
+function makeToolCallSseStream(
+  toolName: string,
+  params: unknown,
+  toolCallId: string
+): ReadableStream<Uint8Array> {
+  const encoder = new TextEncoder();
+  const delta = {
+    tool_calls: [
+      {
+        id: toolCallId,
+        function: { name: toolName, arguments: JSON.stringify(params) },
+      },
+    ],
+  };
+  return new ReadableStream({
+    start(controller) {
+      controller.enqueue(
+        encoder.encode(
+          `data: ${JSON.stringify({ choices: [{ delta }] })}\n\n`
+        )
+      );
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
   });
 }
 
@@ -46,309 +135,276 @@ function makeSseStream(chunks: string[]): ReadableStream<Uint8Array> {
   });
 }
 
-// Helper para criar SSE stream com tool_call no formato OpenRouter
-function makeSseToolCallStream(
-  textBefore: string,
-  toolName: string,
-  toolParams: object,
-  toolCallId: string,
-  textAfter: string
-): ReadableStream<Uint8Array> {
-  const encoder = new TextEncoder();
-  return new ReadableStream({
-    start(controller) {
-      if (textBefore) {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ choices: [{ delta: { content: textBefore } }] })}\n\n`
-          )
-        );
-      }
-      controller.enqueue(
-        encoder.encode(
-          `data: ${JSON.stringify({
-            choices: [{
-              delta: {
-                tool_calls: [{
-                  id: toolCallId,
-                  type: "function",
-                  function: { name: toolName, arguments: JSON.stringify(toolParams) },
-                }],
-              },
-            }],
-          })}\n\n`
-        )
-      );
-      if (textAfter) {
-        controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ choices: [{ delta: { content: textAfter } }] })}\n\n`
-          )
-        );
-      }
-      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-      controller.close();
-    },
-  });
-}
+describe("processTurnFull (HP1 — fluxo básico completo)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-describe("processTurn (legado — args sem clientMessageId)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("Caso 1: sem vazamento na 1ª tentativa → retorna { success: true, messageId }", async () => {
+  it("HP1: fluxo completo → GM criada com causedByMessageId, triggersFired/factsRevealed/tokensUsed persistidos, status 'complete'", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // LLM streaming
-        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
-      } else if (callCount === 2) {
-        // antiLeak — não vazou
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        // factExtraction
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
-      playerMessageContent: "O que você vê?",
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que vejo ao norte?",
+        clientMessageId: "player-full-hp1",
+        status: "complete",
+        createdAt: Date.now(),
+      });
     });
 
-    expect(result).toMatchObject({ success: true });
-    expect((result as { success: true; messageId: string }).messageId).toBeDefined();
+    vi.stubGlobal("fetch", makeRoutedFetch({ sseContent: ["O castelo ao norte brilha."] }));
 
-    // Verifica que a mensagem GM ficou com status "complete"
-    await t.run(async (ctx) => {
-      const msgs = await ctx.db.query("messages").withIndex("by_campaign", (q) => q.eq("campaignId", campaignId)).collect();
-      const gmMsgs = msgs.filter((m) => m.role === "gm");
-      expect(gmMsgs).toHaveLength(1);
-      expect(gmMsgs[0].status).toBe("complete");
-    });
-  });
-
-  it("Caso 2: vaza nas 2 primeiras tentativas, 3ª passa → retorna { success: true, messageId } com id da 3ª mensagem", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      // Sequência: LLM(1), antiLeak(2), LLM(3), antiLeak(4), LLM(5), antiLeak(6), factExtraction(7)
-      if (callCount === 1 || callCount === 3 || callCount === 5) {
-        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
-      } else if (callCount === 2 || callCount === 4) {
-        // antileak: primeiras 2 vazam
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: true, facts: ["fact_001"], trechos: ["trecho"] }) } }],
-          }),
-        };
-      } else if (callCount === 6) {
-        // antiLeak da 3ª tentativa — não vaza
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        // factExtraction
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
-      hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
-      playerMessageContent: "O que você vê?",
+      playerMessageId,
+      antiLeakValidationEnabled: true,
     });
 
     expect(result).toMatchObject({ success: true });
     const messageId = (result as { success: true; messageId: string }).messageId;
-    expect(messageId).toBeDefined();
 
-    // Verifica que as 2 primeiras ficaram "leaked" e a 3ª "complete"
     await t.run(async (ctx) => {
-      const msgs = await ctx.db.query("messages").withIndex("by_campaign", (q) => q.eq("campaignId", campaignId)).collect();
-      const gmMsgs = msgs.filter((m) => m.role === "gm").sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      expect(gmMsgs).toHaveLength(3);
-      expect(gmMsgs[0].status).toBe("leaked");
-      expect(gmMsgs[1].status).toBe("leaked");
-      expect(gmMsgs[2].status).toBe("complete");
-      expect(gmMsgs[2]._id).toBe(messageId);
-    });
-  });
-
-  it("Caso 3: vaza em todas as 3 tentativas → retorna { success: false, reason: 'max_regenerations_exceeded' } e última mensagem fica 'failed'", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string) => {
-      callCount++;
-      if (callCount === 1 || callCount === 3 || callCount === 5) {
-        // LLM gerando resposta GM (streaming)
-        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
-      } else {
-        // validateAntiLeak — sempre vaza
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: true, facts: ["fact_001"], trechos: ["trecho"] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      hiddenFacts: [{ id: "fact_001", content: "O rei está morto." }],
-      playerMessageContent: "O que você vê?",
-    });
-
-    expect(result).toEqual({ success: false, reason: "max_regenerations_exceeded" });
-
-    // Verifica que as 2 primeiras mensagens ficaram "leaked" e a última "failed"
-    await t.run(async (ctx) => {
-      const msgs = await ctx.db.query("messages").withIndex("by_campaign", (q) => q.eq("campaignId", campaignId)).collect();
-      const gmMsgs = msgs.filter((m) => m.role === "gm").sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-      expect(gmMsgs).toHaveLength(3);
-      expect(gmMsgs[0].status).toBe("leaked");
-      expect(gmMsgs[1].status).toBe("leaked");
-      expect(gmMsgs[2].status).toBe("failed");
+      const msg = await ctx.db.get(messageId as any);
+      expect(msg).not.toBeNull();
+      expect((msg as any)!.status).toBe("complete");
+      expect((msg as any)!.causedByMessageId).toBe(playerMessageId);
+      expect((msg as any)!.triggersFired).toEqual([]);
+      expect((msg as any)!.factsRevealed).toEqual([]);
+      expect((msg as any)!.finalizedAt).toBeDefined();
     });
   });
 });
 
-describe("processTurn (K1 — estágios com clientMessageId)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+describe("processTurnFull (HP3 — regeneração por vazamento)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  // HP1: todos os estágios chamados em ordem correta
-  it("HP1: fluxo completo — mensagem GM fica 'complete' e fatos são extraídos no estágio 6", async () => {
+  it("HP3: antileak detecta vazamento na 1ª tentativa → mensagem leaked → 2ª passa → status 'complete'", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // Estágio 2: LLM gera resposta GM (streaming)
-        return { ok: true, body: makeSseStream(["O rei está no castelo ao norte."]) };
-      } else if (callCount === 2) {
-        // Estágio 4: antiLeak — não vazou
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        // Estágio 6: extractAndPersistFacts
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{
-              message: {
-                content: JSON.stringify({
-                  facts: [{ content: "O rei está no castelo ao norte.", visibility: "known", relatedEntityIds: [] }],
-                }),
-              },
-            }],
-          }),
-        };
-      }
-    }));
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que acontece?",
+        clientMessageId: "player-full-hp3",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
 
-    const result = await t.action(internal.processTurn.processTurn, {
+    vi.stubGlobal("fetch", makeRoutedFetch({ antiLeakVazou: true }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
-      clientMessageId: "player-msg-001",
-      hiddenFacts: [{ id: "fact_x", content: "O rei está morto." }],
-      playerMessageContent: "O que você vê ao norte?",
+      playerMessageId,
       antiLeakValidationEnabled: true,
     });
 
     expect(result).toMatchObject({ success: true });
     const messageId = (result as { success: true; messageId: string }).messageId;
-    expect(messageId).toBeDefined();
 
     await t.run(async (ctx) => {
-      // Verifica mensagem GM com status complete
-      const msg = await ctx.db.get(messageId as any);
-      expect(msg).not.toBeNull();
-      expect((msg as any)!.status).toBe("complete");
-
-      // Verifica que o fato foi extraído (estágio 6 executado)
-      const facts = await ctx.db
-        .query("facts")
+      const msgs = await ctx.db
+        .query("messages")
         .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
         .collect();
-      expect(facts).toHaveLength(1);
-      expect(facts[0].content).toBe("O rei está no castelo ao norte.");
+      const gmMsgs = msgs
+        .filter((m) => m.role === "gm")
+        .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+      expect(gmMsgs).toHaveLength(2);
+      expect(gmMsgs[0].status).toBe("leaked");
+      expect(gmMsgs[1].status).toBe("complete");
+      expect(gmMsgs[1]._id).toBe(messageId);
     });
   });
+});
 
-  // EC1: falha no estágio 6 (extractAndPersistFacts lança erro) → status "failed" com conteúdo parcial preservado
-  it("EC1: erro no estágio 6 (extractAndPersistFacts) → mensagem fica 'failed' mas conteúdo GM é preservado", async () => {
+describe("processTurnFull (HP5 — sem gatilhos)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("HP5: sem candidateTriggers → classifyTriggers não chamado → fluxo normal com status 'complete'", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // Estágio 2: LLM gera resposta GM (streaming)
-        return { ok: true, body: makeSseStream(["Conteúdo parcial do GM."]) };
-      } else if (callCount === 2) {
-        // Estágio 4: antiLeak — não vazou
+    // Criar cena ativa sem triggers armados
+    await t.run(async (ctx) => {
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena Sem Gatilhos",
+        status: "active",
+        createdAt: Date.now(),
+      });
+    });
+
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Olho ao redor.",
+        clientMessageId: "player-full-hp5",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
+
+    let classifyCallMade = false;
+    let narrativeCallCount = 0;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("trigger")) {
+        classifyCallMade = true;
+      }
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      // OpenRouter
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        narrativeCallCount++;
+        return { ok: true, body: makeSseStream(["Você vê a floresta silenciosa."]) };
+      }
+      // Anti-leak ou fact extraction
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("anti") || prompt.includes("leak")) {
         return {
           ok: true,
           json: async () => ({
             choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
           }),
         };
-      } else {
-        // Estágio 6: extractAndPersistFacts — erro de rede
-        throw new Error("Network error in fact extraction");
       }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
     }));
 
-    const result = await t.action(internal.processTurn.processTurn, {
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
-      clientMessageId: "player-msg-002",
-      hiddenFacts: [],
-      playerMessageContent: "O que acontece?",
+      playerMessageId,
       antiLeakValidationEnabled: true,
     });
 
-    expect(result).toMatchObject({ success: false });
-    expect((result as { success: false; reason: string }).reason).toBe("fact_extraction_failed");
+    expect(result).toMatchObject({ success: true });
+    // classifyTriggers não deve ter sido chamado (sem triggers armados)
+    expect(classifyCallMade).toBe(false);
+  });
+});
 
+describe("processTurnFull (HP4 — threshold de resumo)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("HP4: 20+ mensagens na cena → summarizeScene agendado no scheduler", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    // Criar cena ativa com 20 mensagens
+    const { sceneId } = await t.run(async (ctx) => {
+      const sceneId = await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena Longa",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      // Inserir 20 mensagens na cena
+      for (let i = 0; i < 20; i++) {
+        await ctx.db.insert("messages", {
+          campaignId,
+          sceneId,
+          role: i % 2 === 0 ? "player" : "gm",
+          content: `Mensagem ${i}`,
+          clientMessageId: `msg-threshold-${i}`,
+          status: "complete",
+          createdAt: Date.now() + i,
+        });
+      }
+      return { sceneId };
+    });
+
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        sceneId,
+        role: "player",
+        content: "Mais uma ação.",
+        clientMessageId: "player-threshold-hp4",
+        status: "complete",
+        createdAt: Date.now() + 100,
+      });
+    });
+
+    vi.stubGlobal("fetch", makeRoutedFetch({ sseContent: ["Resposta."] }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+
+    // Verificar que summarizeScene foi agendado no scheduler
+    await t.run(async (ctx) => {
+      const scheduled = await ctx.db.system.query("_scheduled_functions").collect();
+      const summarizeScheduled = scheduled.some(
+        (s: any) => s.name === "summarizeScene:summarizeScene"
+      );
+      expect(summarizeScheduled).toBe(true);
+    });
+  });
+});
+
+describe("processTurnFull (G-018 — idempotência)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("HP2: chamar processTurnFull duas vezes com mesmo playerMessageId → retorna mesmo gmMessageId sem criar segunda mensagem GM", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    // Criar mensagem do jogador no banco
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que você vê?",
+        clientMessageId: "player-full-001",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
+
+    vi.stubGlobal("fetch", makeRoutedFetch());
+
+    // Primeira chamada
+    const result1 = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+    });
+
+    expect(result1).toMatchObject({ success: true });
+    const messageId1 = (result1 as { success: true; messageId: string }).messageId;
+
+    // Segunda chamada com mesmo playerMessageId — deve ser idempotente
+    const result2 = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+    });
+
+    expect(result2).toMatchObject({ success: true });
+    const messageId2 = (result2 as { success: true; messageId: string }).messageId;
+
+    // Deve retornar o mesmo messageId
+    expect(messageId2).toBe(messageId1);
+
+    // Deve existir apenas 1 mensagem GM no banco
     await t.run(async (ctx) => {
       const msgs = await ctx.db
         .query("messages")
@@ -356,296 +412,551 @@ describe("processTurn (K1 — estágios com clientMessageId)", () => {
         .collect();
       const gmMsgs = msgs.filter((m) => m.role === "gm");
       expect(gmMsgs).toHaveLength(1);
-      // Conteúdo parcial preservado
-      expect(gmMsgs[0].content).toBe("Conteúdo parcial do GM.");
-      // Status reflete falha no estágio 6
-      expect(gmMsgs[0].status).toBe("failed");
+      expect(gmMsgs[0].causedByMessageId).toBe(playerMessageId);
     });
   });
 });
 
-describe("processTurn (K2 — tool calls)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+describe("processTurnFull (G-101 — embedding GM agendado)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  it("HP1: LLM retorna tool_call SSE → toolCall executada, persistida e resultado correto", async () => {
+  it("G-101: após Estágio 7, embedMessage é agendado para a mensagem GM", async () => {
     const t = convexTest(schema, modules);
     const { campaignId } = await setupCampaign(t);
 
-    // Criar character e scene necessários para executar a tool
-    const { characterId } = await t.run(async (ctx) => {
-      const characterId = await ctx.db.insert("characters", {
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
         campaignId,
-        name: "Herói K2",
-        aspects: [],
-        skills: {},
-        stunts: [],
-        fatePoints: 3,
-        stress: { physical: [false, false], mental: [false, false] },
-        consequences: [],
+        role: "player",
+        content: "O que você vê ao redor?",
+        clientMessageId: "player-embed-g101",
+        status: "complete",
+        createdAt: Date.now(),
       });
+    });
+
+    vi.stubGlobal("fetch", makeRoutedFetch({ sseContent: ["Você vê uma floresta densa."] }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+
+    await t.run(async (ctx) => {
+      const scheduled = await ctx.db.system.query("_scheduled_functions").collect();
+      const embedScheduled = scheduled.some(
+        (s: any) => s.name === "lib/embedding:embedMessage"
+      );
+      expect(embedScheduled).toBe(true);
+    });
+  });
+});
+
+describe("processTurnFull (G-102 — contexto semântico no LLM)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  it("G-102: payload enviado ao LLM contém mais de [system, user] — inclui contexto do personagem e cena", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupCampaign(t);
+
+    // Cena ativa e personagem
+    await t.run(async (ctx) => {
       await ctx.db.insert("scenes", {
         campaignId,
-        title: "Cena K2",
+        title: "A Taverna do Cervo",
         status: "active",
         createdAt: Date.now(),
       });
-      return { characterId };
-    });
-
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // Estágio 2: LLM retorna tool call SSE (award_fate_point)
-        return {
-          ok: true,
-          body: makeSseToolCallStream(
-            "Você age heroicamente... ",
-            "award_fate_point",
-            { characterId, reason: "Ato heróico" },
-            "call-k2-001",
-            "Ganhou um Ponto de Destino!"
-          ),
-        };
-      } else if (callCount === 2) {
-        // Estágio 4: antiLeak — não vazou
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        // Estágio 6: extractAndPersistFacts
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      clientMessageId: "player-msg-k2-001",
-      hiddenFacts: [],
-      playerMessageContent: "Faço algo heroico!",
-      antiLeakValidationEnabled: true,
-    });
-
-    expect(result).toMatchObject({ success: true });
-    const messageId = (result as { success: true; messageId: string }).messageId;
-
-    await t.run(async (ctx) => {
-      const msg = await ctx.db.get(messageId as any);
-      expect(msg).not.toBeNull();
-      expect((msg as any)!.toolCalls).toHaveLength(1);
-      expect((msg as any)!.toolCalls[0].toolName).toBe("award_fate_point");
-      expect(typeof (msg as any)!.toolCalls[0].executedAt).toBe("number");
-      // Verificar que o personagem ganhou PD
-      const char = await ctx.db.get(characterId as any) as any;
-      expect(char!.fatePoints).toBe(4);
-    });
-  });
-
-  it("HP2: LLM retorna texto simples → comportamento igual ao K1 (sem regressão)", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { ok: true, body: makeSseStream(["Texto simples do GM."]) };
-      } else if (callCount === 2) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      clientMessageId: "player-msg-k2-002",
-      hiddenFacts: [],
-      playerMessageContent: "O que acontece?",
-      antiLeakValidationEnabled: true,
-    });
-
-    expect(result).toMatchObject({ success: true });
-    const messageId = (result as { success: true; messageId: string }).messageId;
-
-    await t.run(async (ctx) => {
-      const msg = await ctx.db.get(messageId as any);
-      expect(msg).not.toBeNull();
-      expect((msg as any)!.content).toBe("Texto simples do GM.");
-      // Sem tool calls
-      const toolCalls = (msg as any)!.toolCalls;
-      expect(toolCalls === undefined || toolCalls === null || toolCalls.length === 0).toBe(true);
-    });
-  });
-});
-
-describe("processTurn (streaming — G-002)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("HP1: stream de 3 chunks → mensagem GM final tem conteúdo acumulado e status complete", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        // LLM streaming
-        return { ok: true, body: makeSseStream(["Olá ", "mundo", "!"]) };
-      } else if (callCount === 2) {
-        // antiLeak
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        // factExtraction
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      clientMessageId: "player-msg-g002-hp1",
-      hiddenFacts: [],
-      playerMessageContent: "Olá!",
-      antiLeakValidationEnabled: true,
-    });
-
-    expect(result).toMatchObject({ success: true });
-    const messageId = (result as { success: true; messageId: string }).messageId;
-
-    await t.run(async (ctx) => {
-      const msg = await ctx.db.get(messageId as any);
-      expect(msg).not.toBeNull();
-      expect((msg as any)!.content).toBe("Olá mundo!");
-      expect((msg as any)!.status).toBe("complete");
-    });
-  });
-
-  it("HP2: stream com chunk de 250 chars → conteúdo final correto no banco", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    const bigChunk = "a".repeat(250);
-    let callCount = 0;
-    vi.stubGlobal("fetch", vi.fn().mockImplementation(async () => {
-      callCount++;
-      if (callCount === 1) {
-        return { ok: true, body: makeSseStream([bigChunk]) };
-      } else if (callCount === 2) {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
-          }),
-        };
-      } else {
-        return {
-          ok: true,
-          json: async () => ({
-            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
-          }),
-        };
-      }
-    }));
-
-    const result = await t.action(internal.processTurn.processTurn, {
-      campaignId,
-      clientMessageId: "player-msg-g002-hp2",
-      hiddenFacts: [],
-      playerMessageContent: "Texto longo!",
-      antiLeakValidationEnabled: true,
-    });
-
-    expect(result).toMatchObject({ success: true });
-    const messageId = (result as { success: true; messageId: string }).messageId;
-
-    await t.run(async (ctx) => {
-      const msg = await ctx.db.get(messageId as any);
-      expect(msg).not.toBeNull();
-      expect((msg as any)!.content).toBe(bigChunk);
-    });
-  });
-
-  it("EC1: fetch retorna ok: false (429) → processTurn retorna failure ou lança erro", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId } = await setupCampaign(t);
-
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: false,
-      status: 429,
-      text: async () => "Too Many Requests",
-    }));
-
-    let thrown = false;
-    let result: unknown;
-    try {
-      result = await t.action(internal.processTurn.processTurn, {
+      await ctx.db.insert("characters", {
         campaignId,
-        clientMessageId: "player-msg-g002-ec1",
-        hiddenFacts: [],
-        playerMessageContent: "Qualquer coisa",
-        antiLeakValidationEnabled: false,
+        name: "Lyra",
+        aspects: ["Ladrã arrependida"],
+        skills: { Fight: 3 },
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false] },
+        consequences: [],
       });
-    } catch {
-      thrown = true;
-    }
+    });
 
-    // Aceita tanto lançar erro quanto retornar { success: false }
-    if (!thrown) {
-      expect(result).toMatchObject({ success: false });
-    } else {
-      expect(thrown).toBe(true);
-    }
+    const playerMessageId = await t.run(async (ctx) => {
+      return await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Examino a sala em busca de saídas.",
+        clientMessageId: "player-g102",
+        status: "complete",
+        createdAt: Date.now(),
+      });
+    });
+
+    let capturedPayload: any = null;
+    vi.stubGlobal("fetch", makeRoutedFetch({
+      sseContent: ["Você avista três portas."],
+      onLlmCall: (body) => { capturedPayload = body; },
+    }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(capturedPayload).not.toBeNull();
+
+    const messages: Array<{ role: string; content: string }> = capturedPayload.messages;
+    // Deve haver mais de 2 mensagens (não só [system, user])
+    expect(messages.length).toBeGreaterThan(2);
+    // Deve conter bloco do personagem (aspects)
+    const allContent = messages.map((m) => m.content).join(" ");
+    expect(allContent).toContain("Ladrã arrependida");
+    // Última mensagem deve ser do user
+    expect(messages[messages.length - 1].role).toBe("user");
   });
 });
 
-describe("processTurn (K3 — compel_aspect)", () => {
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
+describe("processTurnFull (G-103 — integração de triggers)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
-  async function setupCampaignWithSceneAndAspect(t: ReturnType<typeof convexTest>) {
+  async function setupWithTrigger(
+    t: ReturnType<typeof convexTest>,
+    oneShot: boolean,
+  ) {
     return await t.run(async (ctx) => {
       const userId = await ctx.db.insert("users", {
-        email: "k3@test.com",
-        displayName: "K3 User",
-        tokenIdentifier: "token|k3-" + Math.random(),
+        email: "trigger@test.com",
+        displayName: "Trigger Tester",
+        tokenIdentifier: "token|trigger-" + Math.random(),
       });
       const campaignId = await ctx.db.insert("campaigns", {
         userId,
-        name: "K3 Campaign",
-        premise: "Compel test.",
+        name: "Trigger Campaign",
+        premise: "Testes de gatilho.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const dummyEmbedding = Array.from({ length: 1024 }, (_, i) => i * 0.001);
+      const factId = await ctx.db.insert("facts", {
+        campaignId,
+        content: "O rei está morto.",
+        visibility: "hidden",
+        embedding: dummyEmbedding,
+        createdAt: Date.now(),
+      });
+      const triggerId = await ctx.db.insert("triggers", {
+        campaignId,
+        description: "Revelar morte do rei quando jogador perguntar sobre o castelo",
+        scope: "global",
+        status: "armed",
+        oneShot,
+        embedding: dummyEmbedding,
+        effects: [{ type: "change_fact_visibility", payload: { factId, visibility: "known" } }],
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "O que acontece no castelo?",
+        clientMessageId: "player-trigger-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, factId, triggerId, playerMessageId };
+    });
+  }
+
+  function makeClassifyResponse(activatedIds: string[]) {
+    return {
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: JSON.stringify({ ativados: activatedIds }) } }],
+      }),
+    };
+  }
+
+  it("G-103a: trigger relevante ativa → efeito executado antes da resposta do GM → triggersFired e factsRevealed persistidos", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, factId, triggerId, playerMessageId } = await setupWithTrigger(t, true);
+
+    let classifyCalled = false;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (_url: string, opts: any) => {
+      // Together AI → embedding
+      if (typeof _url === "string" && _url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      // stream=true → LLM narrativo
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["O rei caiu."]) };
+      }
+      // classify triggers → sem stream e tem "candidates" no prompt ou response_format json_object sem "vazou"
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("ativados") || prompt.includes("trigger") || prompt.includes("Revelar morte")) {
+        classifyCalled = true;
+        return makeClassifyResponse([triggerId]);
+      }
+      // antiLeak
+      if (prompt.includes("vazou") || (body.response_format && prompt.includes("trechos"))) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      // factExtraction
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const messageId = (result as { success: true; messageId: string }).messageId;
+
+    await t.run(async (ctx) => {
+      const gmMsg = await ctx.db.get(messageId as any);
+      expect((gmMsg as any)!.triggersFired).toContain(triggerId);
+      expect((gmMsg as any)!.factsRevealed).toContain(factId);
+
+      // Fato deve estar visível agora
+      const fact = await ctx.db.get(factId as any);
+      expect((fact as any)!.visibility).toBe("known");
+    });
+  });
+
+  it("G-103b: trigger oneShot: true → status vira 'fired' e não pode disparar novamente", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, triggerId, playerMessageId } = await setupWithTrigger(t, true);
+
+    vi.stubGlobal("fetch", makeRoutedFetch({ classifyActivatedIds: [triggerId] }));
+
+    await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as any);
+      expect((trigger as any)!.status).toBe("fired");
+    });
+  });
+
+  it("G-103c: trigger oneShot: false → permanece 'armed' após disparar", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, triggerId, playerMessageId } = await setupWithTrigger(t, false);
+
+    vi.stubGlobal("fetch", makeRoutedFetch({ classifyActivatedIds: [triggerId] }));
+
+    await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    await t.run(async (ctx) => {
+      const trigger = await ctx.db.get(triggerId as any);
+      expect((trigger as any)!.status).toBe("armed");
+    });
+  });
+});
+
+describe("processTurnFull (G-104 — anti-leak com hidden facts)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
+
+  async function setupWithHiddenFact(t: ReturnType<typeof convexTest>) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "hidden@test.com",
+        displayName: "Hidden Tester",
+        tokenIdentifier: "token|hidden-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "Hidden Facts Campaign",
+        premise: "Segredos obscuros.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const dummyEmbedding = Array.from({ length: 1024 }, (_, i) => i * 0.001);
+      const hiddenFactId = await ctx.db.insert("facts", {
+        campaignId,
+        content: "O vilão é o rei.",
+        visibility: "hidden",
+        embedding: dummyEmbedding,
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Quem é o vilão?",
+        clientMessageId: "player-hidden-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, hiddenFactId, playerMessageId };
+    });
+  }
+
+  it("G-104a: validateAntiLeak recebe hidden facts relevantes — não [] hard-coded", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, hiddenFactId, playerMessageId } = await setupWithHiddenFact(t);
+
+    let capturedAntiLeakPayload: any = null;
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("trechos")) {
+        capturedAntiLeakPayload = body;
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    const antiLeakPrompt = JSON.stringify(capturedAntiLeakPayload?.messages ?? []);
+    expect(antiLeakPrompt).toContain("O vilão é o rei.");
+  });
+
+  it("G-104b: hidden fact aparece na resposta GM → validateAntiLeak detecta → regenera", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupWithHiddenFact(t);
+
+    vi.stubGlobal("fetch", makeRoutedFetch({ antiLeakVazou: true }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    await t.run(async (ctx) => {
+      const msgs = await ctx.db
+        .query("messages")
+        .withIndex("by_campaign", (q) => q.eq("campaignId", campaignId))
+        .collect();
+      const gmMsgs = msgs.filter((m) => m.role === "gm");
+      expect(gmMsgs).toHaveLength(2);
+      expect(gmMsgs.some((m) => m.status === "leaked")).toBe(true);
+      expect(gmMsgs.some((m) => m.status === "complete")).toBe(true);
+    });
+  });
+});
+
+describe("processTurnFull (G-105 — paralelismo estágios 5 e 6)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key"); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+  async function setupBasic(t: ReturnType<typeof convexTest>) {
+    return t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g105@test.com",
+        displayName: "G105 Tester",
+        tokenIdentifier: "token|g105-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G105 Campaign",
+        premise: "Uma aventura.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const sceneId = await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena",
+        description: "Desc",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Ação do jogador.",
+        clientMessageId: "player-g105-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+  }
+
+  it("G-105a: antiLeak e extractFacts executam concorrentemente (mock counter)", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupBasic(t);
+
+    const callOrder: string[] = [];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("trechos")) {
+        callOrder.push("antiLeak");
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+          }),
+        };
+      }
+      callOrder.push("factExtraction");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    // Ambos devem ter sido chamados
+    expect(callOrder).toContain("antiLeak");
+    expect(callOrder).toContain("factExtraction");
+  });
+
+  it("G-105b: antiLeakEnabled=false executa apenas extractAndPersistFacts", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupBasic(t);
+
+    const callOrder: string[] = [];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("trechos")) {
+        callOrder.push("antiLeak");
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+          }),
+        };
+      }
+      callOrder.push("factExtraction");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: false,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(callOrder).not.toContain("antiLeak");
+    expect(callOrder).toContain("factExtraction");
+  });
+});
+
+describe("processTurnFull (G-112 — re-prompt após tool call)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("G-112: GM chama tool → resultado reenviado ao LLM → GM continua narrativa descrevendo o resultado", async () => {
+    const t = convexTest(schema, modules);
+
+    const { campaignId, playerMessageId, characterId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g112@test.com",
+        displayName: "G112 Tester",
+        tokenIdentifier: "token|g112-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G112 Campaign",
+        premise: "Teste de re-prompt após tool call.",
         tone: "dark",
         expectedDuration: "one-shot",
         status: "active",
@@ -654,85 +965,443 @@ describe("processTurn (K3 — compel_aspect)", () => {
       });
       const characterId = await ctx.db.insert("characters", {
         campaignId,
-        name: "Hero",
-        aspects: ["Dívida com o demônio"],
+        name: "Herói",
+        aspects: [],
         skills: {},
         stunts: [],
         fatePoints: 3,
-        stress: { physical: [false, false], mental: [false, false] },
+        stress: { physical: [false, false, false], mental: [false, false, false] },
         consequences: [],
       });
-      const sceneId = await ctx.db.insert("scenes", {
+      await ctx.db.insert("scenes", {
         campaignId,
-        title: "Cena 1",
+        title: "Cena G-112",
         status: "active",
         createdAt: Date.now(),
       });
-      const aspectId = await ctx.db.insert("sceneAspects", {
-        sceneId,
-        text: "Dívida com o demônio",
-        freeInvokes: 0,
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Uso um ponto de destino!",
+        clientMessageId: "g112-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
       });
-      return { campaignId, characterId, aspectId };
+      return { campaignId, playerMessageId, characterId };
     });
-  }
 
-  it("HP1: tool call compel_aspect SSE → retorna awaiting_player_decision com compelId válido", async () => {
-    const t = convexTest(schema, modules);
-    const { campaignId, characterId, aspectId } = await setupCampaignWithSceneAndAspect(t);
+    const capturedLlmMessages: any[][] = [];
+    let streamCallCount = 0;
 
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
-      ok: true,
-      body: makeSseToolCallStream(
-        "Seu aspecto 'Dívida com o demônio' complica as coisas...",
-        "compel_aspect",
-        { aspectId, characterId, complication: "O demônio aparece e exige pagamento agora." },
-        "call-k3-compel-001",
-        ""
-      ),
-    }));
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          capturedLlmMessages.push(body.messages ?? []);
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite um tool call
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "award_fate_point",
+                { characterId, reason: "teste G-112" },
+                "tc_g112_1"
+              ),
+            };
+          }
+          // 2ª passagem: LLM continua a narrativa com o resultado da tool
+          return { ok: true, body: makeSseStream(["O herói ganha um Ponto de Destino!"]) };
+        }
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
 
-    const result = await t.action(internal.processTurn.processTurn, {
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
-      clientMessageId: "player-msg-k3-001",
-      hiddenFacts: [],
-      playerMessageContent: "O que acontece?",
+      playerMessageId,
+    });
+
+    expect(result).toMatchObject({ success: true });
+
+    // LLM deve ter sido chamado 2 vezes: 1ª para tool call, 2ª para continuação
+    expect(streamCallCount).toBe(2);
+
+    // 2ª chamada deve incluir mensagem assistant com tool_calls e mensagem tool com resultado
+    const secondCallMsgs = capturedLlmMessages[1];
+    const assistantMsg = secondCallMsgs.find(
+      (m: any) => m.role === "assistant" && Array.isArray(m.tool_calls)
+    );
+    const toolMsg = secondCallMsgs.find((m: any) => m.role === "tool");
+
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg.tool_calls[0].function.name).toBe("award_fate_point");
+    expect(toolMsg).toBeDefined();
+    expect(toolMsg.tool_call_id).toBe("tc_g112_1");
+
+    // Mensagem GM deve conter o texto de continuação
+    const gmMessage = await t.run(async (ctx) => {
+      const msgs = await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
+      return msgs;
+    });
+    expect(gmMessage?.content).toContain("O herói ganha um Ponto de Destino!");
+  });
+});
+
+describe("processTurnFull (G-113 — tool call mal-formado)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  it("G-113-1: tool desconhecida não quebra o turno — status 'complete' e texto narrativo preservado", async () => {
+    const t = convexTest(schema, modules);
+
+    const { campaignId, playerMessageId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g113a@test.com",
+        displayName: "G113A Tester",
+        tokenIdentifier: "token|g113a-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G113A Campaign",
+        premise: "Teste de tool desconhecida.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena G-113A",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Faço algo especial!",
+        clientMessageId: "g113a-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+
+    let streamCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite tool call com nome desconhecido
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "nonexistent_tool",
+                { foo: "bar" },
+                "tc_unknown"
+              ),
+            };
+          }
+          // 2ª passagem: LLM continua narrativa após receber resultado sintético
+          return { ok: true, body: makeSseStream(["Narrativa continua normalmente."]) };
+        }
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
       antiLeakValidationEnabled: false,
     });
 
-    expect(result).toMatchObject({ status: "awaiting_player_decision" });
-    const r = result as { status: "awaiting_player_decision"; compelId: string; messageId: string };
-    expect(r.compelId).toBeDefined();
-    expect(r.messageId).toBeDefined();
+    // Turno deve completar com sucesso, não falhar
+    expect(result).toMatchObject({ success: true });
 
-    await t.run(async (ctx) => {
-      const compel = await ctx.db.get(r.compelId as any);
-      expect(compel).not.toBeNull();
-      expect((compel as any)!.status).toBe("pending");
-      expect((compel as any)!.characterId).toBe(characterId);
-      expect((compel as any)!.aspectId).toBe(aspectId);
+    // Mensagem GM deve ter status "complete" e conter texto narrativo
+    const gmMessage = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
     });
+    expect(gmMessage?.status).toBe("complete");
+    expect(gmMessage?.content).toContain("Narrativa continua normalmente.");
+
+    // toolCalls deve conter o resultado sintético { error: "unknown_tool" }
+    expect(gmMessage?.toolCalls).toBeDefined();
+    const toolCalls = gmMessage?.toolCalls as Array<{ toolName: string; toolResult: unknown }>;
+    const unknownToolCall = toolCalls.find((tc) => tc.toolName === "nonexistent_tool");
+    expect(unknownToolCall).toBeDefined();
+    expect((unknownToolCall?.toolResult as any)?.error).toBe("unknown_tool");
   });
 
-  it("HP2: após compel pending, resolveCompelInternal com accept → status accepted", async () => {
+  it("G-113-2: falha na execução da tool retorna erro estruturado e turno completa normalmente", async () => {
     const t = convexTest(schema, modules);
-    const { campaignId, characterId, aspectId } = await setupCampaignWithSceneAndAspect(t);
 
-    const compelId = await t.mutation(internal.compels.beginCompelInternal, {
+    const { campaignId, playerMessageId } = await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g113b@test.com",
+        displayName: "G113B Tester",
+        tokenIdentifier: "token|g113b-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G113B Campaign",
+        premise: "Teste de params inválidos.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      await ctx.db.insert("characters", {
+        campaignId,
+        name: "Herói",
+        aspects: [],
+        skills: {},
+        stunts: [],
+        fatePoints: 3,
+        stress: { physical: [false, false, false], mental: [false, false, false] },
+        consequences: [],
+      });
+      await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena G-113B",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Rolo os dados!",
+        clientMessageId: "g113b-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+
+    let streamCallCount = 0;
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(async (url: string, opts: any) => {
+        if (typeof url === "string" && url.includes("together")) {
+          return makeEmbeddingResponse();
+        }
+        const body = opts?.body ? JSON.parse(opts.body) : {};
+        if (body.stream === true) {
+          streamCallCount++;
+          if (streamCallCount === 1) {
+            // 1ª passagem: LLM emite roll_fate_dice com params inválidos (campos obrigatórios ausentes)
+            return {
+              ok: true,
+              body: makeToolCallSseStream(
+                "roll_fate_dice",
+                {}, // params inválidos — campos obrigatórios ausentes
+                "tc_bad_params"
+              ),
+            };
+          }
+          // 2ª passagem: LLM recebe { error: "invalid_params" } e continua narrativa
+          return { ok: true, body: makeSseStream(["A rolagem falhou, mas a narrativa segue."]) };
+        }
+        // Simular falha no executor quando chamado via mutation (não-stream)
+        // O executor é chamado via ctx.runMutation internamente — mas no teste o fetch é apenas para LLM/HTTP
+        // A falha será simulada pelo executor real que vai rejeitar params {} para roll_fate_dice
+        const prompt = JSON.stringify(body.messages ?? []);
+        if (prompt.includes("vazou") || prompt.includes("trechos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+            }),
+          };
+        }
+        if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+          return {
+            ok: true,
+            json: async () => ({
+              choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+            }),
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+          }),
+        };
+      })
+    );
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
       campaignId,
-      aspectId,
-      characterId,
-      complication: "O demônio aparece e exige pagamento agora.",
+      playerMessageId,
+      antiLeakValidationEnabled: false,
     });
 
-    await t.mutation(internal.compels.resolveCompelInternal, {
-      compelId,
-      decision: "accept",
+    // Turno deve completar com sucesso mesmo com falha na execução da tool
+    expect(result).toMatchObject({ success: true });
+
+    // Mensagem GM deve ter status "complete"
+    const gmMessage = await t.run(async (ctx) => {
+      return await ctx.db
+        .query("messages")
+        .filter((q) => q.eq(q.field("role"), "gm"))
+        .first();
+    });
+    expect(gmMessage?.status).toBe("complete");
+
+    // toolCalls deve conter resultado com { error: "invalid_params" }
+    expect(gmMessage?.toolCalls).toBeDefined();
+    const toolCalls = gmMessage?.toolCalls as Array<{ toolName: string; toolResult: unknown }>;
+    const failedToolCall = toolCalls.find((tc) => tc.toolName === "roll_fate_dice");
+    expect(failedToolCall).toBeDefined();
+    expect((failedToolCall?.toolResult as any)?.error).toBe("invalid_params");
+  });
+});
+
+describe("processTurnFull (G-114 — guard setupStatus)", () => {
+  beforeEach(() => {
+    vi.stubEnv("TOGETHER_API_KEY", "test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "test-openrouter-key");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  async function setupCampaignWithSetupStatus(
+    t: ReturnType<typeof convexTest>,
+    setupStatus: "draft" | "generating" | "ready" | undefined
+  ) {
+    return await t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g114@test.com",
+        displayName: "G114 Tester",
+        tokenIdentifier: "token|g114-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G114 Campaign",
+        premise: "Teste de guard setupStatus.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        setupStatus,
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Ação do jogador.",
+        clientMessageId: "g114-player-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+  }
+
+  it("G-114a: campanha com setupStatus 'generating' retorna { success: false, reason: 'campaign_not_ready' }", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupCampaignWithSetupStatus(t, "generating");
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
     });
 
-    await t.run(async (ctx) => {
-      const compel = await ctx.db.get(compelId as any);
-      expect((compel as any)!.status).toBe("accepted");
+    expect(result).toEqual({ success: false, reason: "campaign_not_ready" });
+  });
+
+  it("G-114b: campanha com setupStatus 'draft' retorna { success: false, reason: 'campaign_not_ready' }", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupCampaignWithSetupStatus(t, "draft");
+
+    const result = await t.action(internal.processTurn.processTurnFull, {
+      campaignId,
+      playerMessageId,
     });
+
+    expect(result).toEqual({ success: false, reason: "campaign_not_ready" });
   });
 });

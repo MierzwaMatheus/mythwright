@@ -1,12 +1,19 @@
-import { internalAction, internalMutation } from "./_generated/server";
+import { internalAction } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
+import { buildGmSystemPrompt } from "./prompts/gmSystemPrompt";
+import { buildFullContext } from "./lib/contextBuilder";
+import { retrieveSemanticContext } from "./lib/semanticMemory";
+import { vectorSearch } from "./lib/vectorSearch";
+import { resolveOpenRouterKey, OpenRouterKeyMissingError } from "./lib/llmAuth";
+import { getFateTool } from "./tools/catalog";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const MAX_REGENERATIONS = 2; // 3 tentativas no total (0, 1, 2)
+const MAX_REGENERATIONS = 2;
 const FLUSH_CHAR_THRESHOLD = 200;
 const FLUSH_MS_THRESHOLD = 100;
+const SUMMARY_THRESHOLD = 20;
 const MAX_TOOL_CALLS_PER_TURN = 10;
 
 type ToolCallRecord = {
@@ -16,12 +23,13 @@ type ToolCallRecord = {
   executedAt: number;
 };
 
-
 type StreamEvent =
   | { type: "text_delta"; delta: string }
   | { type: "tool_call"; toolName: string; toolParams: unknown; toolCallId: string };
 
-async function* parseStreamingResponse(body: ReadableStream<Uint8Array>): AsyncGenerator<StreamEvent> {
+async function* parseStreamingResponse(
+  body: ReadableStream<Uint8Array>
+): AsyncGenerator<StreamEvent> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -46,8 +54,17 @@ async function* parseStreamingResponse(body: ReadableStream<Uint8Array>): AsyncG
           for (const tc of delta.tool_calls) {
             if (tc.function?.name) {
               let params: unknown = {};
-              try { params = JSON.parse(tc.function.arguments ?? "{}"); } catch {}
-              yield { type: "tool_call", toolName: tc.function.name, toolParams: params, toolCallId: tc.id ?? "" };
+              try {
+                params = JSON.parse(tc.function.arguments ?? "{}");
+              } catch {
+                console.warn("[G-113] Failed to parse tool arguments for", tc.function.name, "— using {}");
+              }
+              yield {
+                type: "tool_call",
+                toolName: tc.function.name,
+                toolParams: params,
+                toolCallId: tc.id ?? "",
+              };
             }
           }
         }
@@ -56,18 +73,28 @@ async function* parseStreamingResponse(body: ReadableStream<Uint8Array>): AsyncG
   }
 }
 
-async function callLlm(playerMessageContent: string, model: string): Promise<ReadableStream<Uint8Array>> {
+async function callLlm(
+  messages: Array<Record<string, unknown>>,
+  model: string,
+  apiKey: string,
+  tools?: unknown[]
+): Promise<ReadableStream<Uint8Array>> {
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    stream: true,
+  };
+  if (tools && tools.length > 0) {
+    body.tools = tools;
+  }
+
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
     headers: {
-      "Authorization": `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "user", content: playerMessageContent }],
-      stream: true,
-    }),
+    body: JSON.stringify(body),
   });
   if (!response.ok) {
     const errorText = await response.text();
@@ -76,147 +103,349 @@ async function callLlm(playerMessageContent: string, model: string): Promise<Rea
   return response.body!;
 }
 
-export const markMessageStatus = internalMutation({
-  args: {
-    messageId: v.id("messages"),
-    status: v.union(v.literal("pending"), v.literal("complete"), v.literal("failed"), v.literal("leaked")),
-  },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.messageId, { status: args.status });
-  },
-});
-
-export const createGmMessage = internalMutation({
+export const processTurnFull = internalAction({
   args: {
     campaignId: v.id("campaigns"),
-    content: v.string(),
-    toolCalls: v.optional(v.array(v.object({
-      toolName: v.string(),
-      toolParams: v.any(),
-      toolResult: v.any(),
-      executedAt: v.number(),
-    }))),
-  },
-  handler: async (ctx, args): Promise<Id<"messages">> => {
-    return await ctx.db.insert("messages", {
-      campaignId: args.campaignId,
-      role: "gm",
-      content: args.content,
-      clientMessageId: "gm-" + Date.now() + "-" + Math.random(),
-      status: "pending",
-      createdAt: Date.now(),
-      ...(args.toolCalls !== undefined ? { toolCalls: args.toolCalls } : {}),
-    });
-  },
-});
-
-export const processTurn = internalAction({
-  args: {
-    campaignId: v.id("campaigns"),
-    clientMessageId: v.optional(v.string()),
-    hiddenFacts: v.array(v.object({ id: v.string(), content: v.string() })),
-    playerMessageContent: v.string(),
+    playerMessageId: v.id("messages"),
     antiLeakValidationEnabled: v.optional(v.boolean()),
   },
-  handler: async (ctx, args): Promise<
+  handler: async (
+    ctx,
+    args
+  ): Promise<
     | { success: true; messageId: Id<"messages"> }
     | { success: false; reason: string }
     | { status: "awaiting_player_decision"; compelId: Id<"compels">; messageId: Id<"messages"> }
   > => {
-    const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, { campaignId: args.campaignId });
-    for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
-      // Streaming: obter o body SSE do LLM
-      const streamBody = await callLlm(args.playerMessageContent, llmConfig.narrativeModel);
+    // --- GUARD DE IDEMPOTÊNCIA ---
+    const existingGmMessage = await ctx.runQuery(
+      internal.messages.findGmByCausedByInternal,
+      { causedByMessageId: args.playerMessageId }
+    );
+    if (existingGmMessage !== null && existingGmMessage.status === "complete") {
+      return { success: true, messageId: existingGmMessage._id };
+    }
 
-      // Criar stub de mensagem GM com content vazio antes de stremar
-      const gmMessageId: Id<"messages"> = await ctx.runMutation(internal.processTurn.createGmMessage, {
+    // --- BUSCAR DADOS BASE ---
+    const [playerMessage, campaign, activeScene] = await Promise.all([
+      ctx.runQuery(internal.messages.getByIdInternal, {
+        messageId: args.playerMessageId,
+      }),
+      ctx.runQuery(internal.campaigns.getByIdInternal, {
         campaignId: args.campaignId,
-        content: "",
+      }),
+      ctx.runQuery(internal.scenes.getActiveSceneInternal, {
+        campaignId: args.campaignId,
+      }),
+    ]);
+
+    if (!playerMessage) {
+      return { success: false, reason: "player_message_not_found" };
+    }
+    if (!campaign) {
+      return { success: false, reason: "campaign_not_found" };
+    }
+    if (campaign.setupStatus !== undefined && campaign.setupStatus !== "ready") {
+      return { success: false, reason: "campaign_not_ready" };
+    }
+
+    // --- BYOK: resolver chave OpenRouter antes de qualquer chamada LLM ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
+    }
+
+    const llmConfig = await ctx.runQuery(
+      internal.lib.llmConfig.getLlmConfigInternal,
+      { campaignId: args.campaignId }
+    );
+
+    const systemPrompt = buildGmSystemPrompt({
+      tone: campaign.tone,
+      premise: campaign.premise,
+    });
+
+    // --- ESTÁGIO 2: montagem do contexto semântico ---
+    const queryEmbedding = await ctx.runAction(
+      internal.lib.embedding.generateEmbedding,
+      { text: playerMessage.content }
+    );
+
+    const [semanticCtx, character, recentMessages, sceneAspects] = await Promise.all([
+      retrieveSemanticContext(ctx, { campaignId: args.campaignId, queryEmbedding }),
+      ctx.runQuery(internal.characters.getByCampaignIdInternal, { campaignId: args.campaignId }),
+      activeScene
+        ? ctx.runQuery(internal.messages.getRecentBySceneInternal, { sceneId: activeScene._id, limit: 10 })
+        : Promise.resolve([]),
+      activeScene
+        ? ctx.runQuery(internal.sceneAspects.getBySceneInternal, { sceneId: activeScene._id })
+        : Promise.resolve([]),
+    ]);
+
+    const campaignForContext = { name: campaign.name, systemPrompt };
+    const sceneForContext = activeScene
+      ? { title: activeScene.title, description: activeScene.description, status: activeScene.status }
+      : { title: "Sem cena ativa", status: "inactive" as const };
+    const messagesForContext = [...recentMessages].reverse().map((m) => ({
+      role: m.role === "gm" ? ("assistant" as const) : ("user" as const),
+      content: m.content,
+      status: m.status === "failed" ? ("failed" as const) : ("ok" as const),
+    }));
+    messagesForContext.push({ role: "user" as const, content: playerMessage.content, status: "ok" as const });
+
+    const characterForContext = character ?? {
+      name: "Desconhecido",
+      aspects: [],
+      skills: {},
+      stunts: [],
+      fatePoints: 3,
+      stress: { physical: [false, false, false], mental: [false, false, false] },
+      consequences: [],
+    };
+
+    const aspectEvents = sceneAspects.map((a) => ({ name: a.text, description: `${a.freeInvokes} invocações livres` }));
+
+    // --- ESTÁGIO 3: classificação e disparo de triggers ---
+    const triggersFired: Id<"triggers">[] = [];
+    const factsRevealedFromTriggers: Id<"facts">[] = [];
+    const triggeredEventDescriptions: Array<{ name: string; description: string }> = [];
+
+    const armedTriggers = await ctx.runQuery(api.triggers.getArmedTriggersByScope, {
+      campaignId: args.campaignId,
+      sceneId: activeScene?._id,
+    });
+
+    if (armedTriggers.length > 0) {
+      const triggerSearchResults = await vectorSearch(
+        ctx,
+        "triggers",
+        "by_embedding",
+        queryEmbedding,
+        { campaignId: args.campaignId },
+        armedTriggers.length * 2,
+      );
+
+      const armedIdSet = new Set(armedTriggers.map((t) => t._id as string));
+      const ranked = triggerSearchResults.filter((r) => armedIdSet.has(r._id));
+
+      // Fallback para pré-filtro quando nenhum trigger tem embedding ainda
+      const topK = ranked.length > 0 ? ranked.slice(0, 5) : armedTriggers.slice(0, 5).map((t) => ({ _id: t._id as string, _score: 1 }));
+
+      const candidates = topK.map((r) => {
+        const trigger = armedTriggers.find((t) => (t._id as string) === r._id)!;
+        return { id: r._id, description: trigger.description, scope: trigger.scope };
       });
 
-      // Iterar o stream acumulando texto e tool calls
+      if (candidates.length > 0) {
+        const sceneSummary = activeScene
+          ? `${activeScene.title}: ${activeScene.description ?? ""}`
+          : "";
+
+        const classified = await ctx.runAction(internal.classifyTriggers.classifyTriggers, {
+          campaignId: args.campaignId,
+          playerMessage: playerMessage.content,
+          sceneSummary,
+          candidates,
+          apiKey: openRouterApiKey,
+        });
+
+        for (const triggerId of classified.activatedIds) {
+          const result = await ctx.runMutation(internal.triggers.fireTrigger, {
+            triggerId: triggerId as Id<"triggers">,
+            firedByMessageId: args.playerMessageId,
+          });
+          triggersFired.push(triggerId as Id<"triggers">);
+          factsRevealedFromTriggers.push(...result.revealedFactIds);
+          const trigger = armedTriggers.find((t) => (t._id as string) === triggerId);
+          if (trigger) {
+            triggeredEventDescriptions.push({ name: trigger.description, description: "trigger disparado" });
+          }
+        }
+      }
+    }
+
+    const firedEvents = [...aspectEvents, ...triggeredEventDescriptions];
+
+    const llmMessages = buildFullContext(
+      campaignForContext,
+      characterForContext,
+      sceneForContext,
+      messagesForContext,
+      semanticCtx.facts,
+      semanticCtx.summaries,
+      firedEvents,
+    );
+
+    // --- LOOP DE REGENERAÇÃO ---
+    for (let attempt = 0; attempt <= MAX_REGENERATIONS; attempt++) {
+      // Criar stub de mensagem GM com causedByMessageId
+      const gmMessageId: Id<"messages"> = await ctx.runMutation(
+        internal.messages.createGmStubInternal,
+        {
+          campaignId: args.campaignId,
+          causedByMessageId: args.playerMessageId,
+          ...(activeScene ? { sceneId: activeScene._id } : {}),
+        }
+      );
+
+      // Streaming com loop de re-prompt após tool calls
       let pendingBuffer = "";
       let fullText = "";
       let lastFlushAt = Date.now();
       const accumulatedToolCalls: ToolCallRecord[] = [];
       let toolCallCount = 0;
+      const currentMessages: Array<Record<string, unknown>> = [...llmMessages];
 
-      // Obter cena ativa para o contexto das tools
-      const activeScene = await ctx.runQuery(internal.scenes.getActiveSceneInternal, { campaignId: args.campaignId });
+      while (true) {
+        const streamBody = await callLlm(currentMessages, llmConfig.narrativeModel, openRouterApiKey);
 
-      for await (const event of parseStreamingResponse(streamBody)) {
-        if (event.type === "text_delta") {
-          pendingBuffer += event.delta;
-          fullText += event.delta;
-          const now = Date.now();
-          const shouldFlush =
-            pendingBuffer.length >= FLUSH_CHAR_THRESHOLD ||
-            now - lastFlushAt >= FLUSH_MS_THRESHOLD;
-          if (shouldFlush) {
-            await ctx.runMutation(api.messages.appendMessageTokens, {
-              messageId: gmMessageId,
-              tokens: pendingBuffer,
-            });
-            pendingBuffer = "";
-            lastFlushAt = Date.now();
-          }
-        } else if (event.type === "tool_call") {
-          toolCallCount += 1;
-          if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
-            await ctx.runMutation(internal.processTurn.markMessageStatus, {
-              messageId: gmMessageId,
-              status: "failed",
-            });
-            return { success: false, reason: "tool_call_limit_exceeded" };
-          }
-          // Flush texto pendente antes de executar a tool
-          if (pendingBuffer.length > 0) {
-            await ctx.runMutation(api.messages.appendMessageTokens, {
-              messageId: gmMessageId,
-              tokens: pendingBuffer,
-            });
-            pendingBuffer = "";
-            lastFlushAt = Date.now();
-          }
+        const pendingToolCallsThisPass: Array<{
+          toolName: string;
+          toolParams: unknown;
+          toolCallId: string;
+          toolResult: unknown;
+        }> = [];
+        let textThisPass = "";
 
-          if (event.toolName === "compel_aspect") {
-            // compel_aspect pausa o turno — registrar e parar o stream
-            const params = event.toolParams as { aspectId: Id<"sceneAspects">; characterId: Id<"characters">; complication: string };
-            const compelId: Id<"compels"> = await ctx.runMutation(internal.compels.beginCompelInternal, {
-              campaignId: args.campaignId,
-              aspectId: params.aspectId,
-              characterId: params.characterId,
-              complication: params.complication,
-            });
-            // Persistir conteúdo parcial na mensagem antes de pausar
-            await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
-              messageId: gmMessageId,
-              content: fullText,
-              toolCalls: accumulatedToolCalls,
-            });
-            return { status: "awaiting_player_decision", compelId, messageId: gmMessageId };
-          } else {
-            // Executar tool via mutation
-            const toolResult = await ctx.runMutation(internal.tools.executor.executeFateTool, {
-              toolName: event.toolName,
-              toolParams: event.toolParams,
-              context: {
-                campaignId: args.campaignId,
+        for await (const event of parseStreamingResponse(streamBody)) {
+          if (event.type === "text_delta") {
+            pendingBuffer += event.delta;
+            fullText += event.delta;
+            textThisPass += event.delta;
+            const now = Date.now();
+            const shouldFlush =
+              pendingBuffer.length >= FLUSH_CHAR_THRESHOLD ||
+              now - lastFlushAt >= FLUSH_MS_THRESHOLD;
+            if (shouldFlush) {
+              await ctx.runMutation(api.messages.appendMessageTokens, {
                 messageId: gmMessageId,
-                sceneId: (activeScene?._id ?? "") as Id<"scenes">,
-              },
-            });
-            accumulatedToolCalls.push({
-              toolName: event.toolName,
-              toolParams: event.toolParams,
-              toolResult,
-              executedAt: Date.now(),
-            });
+                tokens: pendingBuffer,
+              });
+              pendingBuffer = "";
+              lastFlushAt = Date.now();
+            }
+          } else if (event.type === "tool_call") {
+            toolCallCount += 1;
+            if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
+              await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
+                messageId: gmMessageId,
+                status: "failed",
+              });
+              return { success: false, reason: "tool_call_limit_exceeded" };
+            }
+            if (pendingBuffer.length > 0) {
+              await ctx.runMutation(api.messages.appendMessageTokens, {
+                messageId: gmMessageId,
+                tokens: pendingBuffer,
+              });
+              pendingBuffer = "";
+              lastFlushAt = Date.now();
+            }
+
+            if (event.toolName === "compel_aspect") {
+              const params = event.toolParams as {
+                aspectId: Id<"sceneAspects">;
+                characterId: Id<"characters">;
+                complication: string;
+              };
+              const compelId: Id<"compels"> = await ctx.runMutation(
+                internal.compels.beginCompelInternal,
+                {
+                  campaignId: args.campaignId,
+                  aspectId: params.aspectId,
+                  characterId: params.characterId,
+                  complication: params.complication,
+                  triggeringMessageId: args.playerMessageId,
+                  pausedGmMessageId: gmMessageId,
+                }
+              );
+              await ctx.runMutation(internal.lib.messageState.updateGmMessageContent, {
+                messageId: gmMessageId,
+                content: fullText,
+                toolCalls: accumulatedToolCalls,
+              });
+              return {
+                status: "awaiting_player_decision",
+                compelId,
+                messageId: gmMessageId,
+              };
+            } else {
+              const knownTool = getFateTool(event.toolName);
+              if (!knownTool) {
+                console.warn("[G-113] Unknown tool call:", event.toolName, "— skipping execution");
+                const syntheticResult = { error: "unknown_tool", toolName: event.toolName };
+                accumulatedToolCalls.push({ toolName: event.toolName, toolParams: event.toolParams, toolResult: syntheticResult, executedAt: Date.now() });
+                pendingToolCallsThisPass.push({ toolName: event.toolName, toolParams: event.toolParams, toolCallId: event.toolCallId || `tc_${toolCallCount}`, toolResult: syntheticResult });
+                continue;
+              }
+              let toolResult: unknown;
+              try {
+                toolResult = await ctx.runMutation(
+                  internal.tools.executor.executeFateTool,
+                  {
+                    toolName: event.toolName,
+                    toolParams: event.toolParams,
+                    context: {
+                      campaignId: args.campaignId,
+                      messageId: gmMessageId,
+                      sceneId: (activeScene?._id ?? "") as Id<"scenes">,
+                    },
+                  }
+                );
+              } catch (err) {
+                console.warn("[G-113] Tool execution failed for", event.toolName, ":", err);
+                toolResult = { error: "invalid_params", toolName: event.toolName };
+              }
+              accumulatedToolCalls.push({
+                toolName: event.toolName,
+                toolParams: event.toolParams,
+                toolResult,
+                executedAt: Date.now(),
+              });
+              pendingToolCallsThisPass.push({
+                toolName: event.toolName,
+                toolParams: event.toolParams,
+                toolCallId: event.toolCallId || `tc_${toolCallCount}`,
+                toolResult,
+              });
+            }
           }
+        }
+
+        // Sem tools nesta passagem → LLM terminou
+        if (pendingToolCallsThisPass.length === 0) break;
+
+        // Re-prompt: adiciona mensagem assistant com tool_calls + mensagens tool com resultados
+        currentMessages.push({
+          role: "assistant",
+          content: textThisPass || null,
+          tool_calls: pendingToolCallsThisPass.map((tc) => ({
+            id: tc.toolCallId,
+            type: "function",
+            function: {
+              name: tc.toolName,
+              arguments: JSON.stringify(tc.toolParams),
+            },
+          })),
+        });
+        for (const tc of pendingToolCallsThisPass) {
+          currentMessages.push({
+            role: "tool",
+            tool_call_id: tc.toolCallId,
+            content: JSON.stringify(tc.toolResult),
+          });
         }
       }
 
-      // Flush final do buffer pendente
+      // Flush final
       if (pendingBuffer.length > 0) {
         await ctx.runMutation(api.messages.appendMessageTokens, {
           messageId: gmMessageId,
@@ -224,85 +453,296 @@ export const processTurn = internalAction({
         });
       }
 
-      // Persistir conteúdo final e tool calls acumuladas
-      await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
+      // Persistir conteúdo final e tool calls
+      await ctx.runMutation(internal.lib.messageState.updateGmMessageContent, {
         messageId: gmMessageId,
         content: fullText,
         toolCalls: accumulatedToolCalls.length > 0 ? accumulatedToolCalls : undefined,
       });
 
-      // Respeitar antiLeakValidationEnabled
+      // AntiLeak
       const antiLeakEnabled = args.antiLeakValidationEnabled !== false;
-
       if (!antiLeakEnabled) {
-        await ctx.runMutation(internal.processTurn.markMessageStatus, {
-          messageId: gmMessageId,
-          status: "complete",
-        });
-        return { success: true, messageId: gmMessageId };
-      }
-
-      const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
-        messageId: gmMessageId,
-        campaignId: args.campaignId,
-        hiddenFacts: args.hiddenFacts,
-      });
-
-      if (!leakResult.vazou) {
-        await ctx.runMutation(internal.processTurn.markMessageStatus, {
-          messageId: gmMessageId,
-          status: "complete",
-        });
-
-        // Estágio 6: extrair e persistir fatos
         try {
           await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
             messageId: gmMessageId,
             campaignId: args.campaignId,
+            apiKey: openRouterApiKey,
           });
         } catch {
-          await ctx.runMutation(internal.processTurn.markMessageStatus, {
+          await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
             messageId: gmMessageId,
             status: "failed",
           });
           return { success: false, reason: "fact_extraction_failed" };
+        }
+        await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+          gmMessageId,
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
+        });
+        return { success: true, messageId: gmMessageId };
+      }
+
+      // --- ESTÁGIO 5: recuperar hidden facts relevantes para anti-leak ---
+      const gmEmbedding = await ctx.runAction(internal.lib.embedding.generateEmbedding, {
+        text: fullText,
+      });
+      const hiddenFactSearchResults = await vectorSearch(
+        ctx,
+        "facts",
+        "by_embedding",
+        gmEmbedding,
+        { campaignId: args.campaignId },
+        30,
+      );
+      const hiddenFactDocs = await Promise.all(
+        hiddenFactSearchResults.slice(0, 10).map((r) =>
+          ctx.runQuery(internal.facts.getByIdInternal, { factId: r._id as Id<"facts"> })
+        )
+      );
+      const hiddenFacts = hiddenFactDocs
+        .filter((d): d is NonNullable<typeof d> => d !== null && d.visibility === "hidden")
+        .map((d) => ({ id: d._id as string, content: d.content }));
+
+      // --- ESTÁGIOS 5 e 6 em paralelo ---
+      const [leakResult, factExtractionError] = await Promise.all([
+        ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
+          messageId: gmMessageId,
+          campaignId: args.campaignId,
+          hiddenFacts,
+          apiKey: openRouterApiKey,
+        }),
+        ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+          messageId: gmMessageId,
+          campaignId: args.campaignId,
+          apiKey: openRouterApiKey,
+        }).then(() => null).catch((e: unknown) => e),
+      ]);
+
+      if (factExtractionError !== null && !leakResult.vazou) {
+        await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
+          messageId: gmMessageId,
+          status: "failed",
+        });
+        return { success: false, reason: "fact_extraction_failed" };
+      }
+
+      if (!leakResult.vazou) {
+
+        // Estágio 7: housekeeping
+        await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+          gmMessageId,
+          triggersFired,
+          factsRevealed: factsRevealedFromTriggers,
+        });
+
+        await ctx.scheduler.runAfter(0, internal.lib.embedding.embedMessage, { messageId: gmMessageId, content: fullText });
+
+        // Estágio 8: threshold de resumo
+        if (activeScene) {
+          const msgCount = await ctx.runQuery(
+            internal.messages.countBySceneInternal,
+            { sceneId: activeScene._id }
+          );
+          if (msgCount >= SUMMARY_THRESHOLD) {
+            await ctx.scheduler.runAfter(0, internal.summarizeScene.summarizeScene, {
+              sceneId: activeScene._id,
+              apiKey: openRouterApiKey,
+            });
+          }
         }
 
         return { success: true, messageId: gmMessageId };
       }
 
       if (attempt < MAX_REGENERATIONS) {
-        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+        await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
           messageId: gmMessageId,
           status: "leaked",
         });
       } else {
-        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+        await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
           messageId: gmMessageId,
           status: "failed",
         });
         return { success: false, reason: "max_regenerations_exceeded" };
       }
     }
+
     return { success: false, reason: "max_regenerations_exceeded" };
   },
 });
 
-export const updateGmMessageContent = internalMutation({
+export const continueAfterCompel = internalAction({
   args: {
-    messageId: v.id("messages"),
-    content: v.string(),
-    toolCalls: v.optional(v.array(v.object({
-      toolName: v.string(),
-      toolParams: v.any(),
-      toolResult: v.any(),
-      executedAt: v.number(),
-    }))),
+    playerMessageId: v.id("messages"),
+    gmMessageId: v.id("messages"),
+    compelId: v.id("compels"),
+    antiLeakValidationEnabled: v.optional(v.boolean()),
+    // Optional pre-fetched compel data (used when called from scheduler to avoid runQuery bug in convex-test)
+    _compelStatus: v.optional(v.union(v.literal("accepted"), v.literal("refused"), v.literal("pending"))),
+    _compelComplication: v.optional(v.string()),
+    _compelCampaignId: v.optional(v.id("campaigns")),
   },
-  handler: async (ctx, args) => {
-    await ctx.db.patch(args.messageId, {
-      content: args.content,
-      ...(args.toolCalls !== undefined ? { toolCalls: args.toolCalls } : {}),
+  handler: async (ctx, args): Promise<
+    | { success: true; messageId: Id<"messages"> }
+    | { success: false; reason: string }
+  > => {
+    // 1. Buscar compel (ou usar dados pré-carregados para evitar runQuery em scheduled context)
+    let compel: { status: string; complication: string; campaignId: Id<"campaigns"> } | null = null;
+    if (args._compelStatus && args._compelComplication && args._compelCampaignId) {
+      compel = {
+        status: args._compelStatus,
+        complication: args._compelComplication,
+        campaignId: args._compelCampaignId,
+      };
+    } else {
+      try {
+        compel = await ctx.runQuery(internal.compels.getById, { compelId: args.compelId });
+      } catch (e) {
+        return { success: false, reason: "compel_not_found" };
+      }
+    }
+    if (!compel) return { success: false, reason: "compel_not_found" };
+
+    // 2. Append compel_resolution tool call na gmMessage
+    try {
+      await ctx.runMutation(api.messages.appendToolCall, {
+        messageId: args.gmMessageId,
+        toolName: "compel_resolution",
+        toolParams: { compelId: args.compelId },
+        toolResult: {
+          decision: compel.status,
+          fatePointDelta: compel.status === "accepted" ? +1 : -1,
+        },
+      });
+    } catch (e) {
+      console.error("continueAfterCompel: appendToolCall failed:", e);
+      // Non-fatal: continue without appending tool call
+    }
+
+    // 3. Buscar dados base
+    const [playerMessage, campaign] = await Promise.all([
+      ctx.runQuery(internal.messages.getByIdInternal, { messageId: args.playerMessageId }),
+      ctx.runQuery(internal.campaigns.getByIdInternal, { campaignId: compel.campaignId }),
+    ]);
+
+    if (!playerMessage) return { success: false, reason: "player_message_not_found" };
+    if (!campaign) return { success: false, reason: "campaign_not_found" };
+
+    // --- BYOK: resolver chave OpenRouter ---
+    let openRouterApiKey: string;
+    try {
+      openRouterApiKey = await ctx.runQuery(
+        internal.lib.llmAuth.resolveOpenRouterKeyInternal,
+        { userId: campaign.userId }
+      );
+    } catch (err) {
+      if (err instanceof OpenRouterKeyMissingError || (err instanceof Error && err.message === "openrouter_key_missing")) {
+        return { success: false, reason: "openrouter_key_missing" };
+      }
+      throw err;
+    }
+
+    const llmConfig = await ctx.runQuery(internal.lib.llmConfig.getLlmConfigInternal, {
+      campaignId: compel.campaignId,
     });
+
+    const systemPrompt = buildGmSystemPrompt({ tone: campaign.tone, premise: campaign.premise });
+
+    // 4. Montar mensagens para LLM incluindo decisão do compel
+    const compelContext = compel.status === "accepted"
+      ? `O jogador ACEITOU o compel "${compel.complication}". Continue a narrativa com essa complicação.`
+      : `O jogador RECUSOU o compel "${compel.complication}" gastando um Ponto de Destino. Continue sem essa complicação.`;
+
+    const llmMessages: Array<{ role: string; content: string }> = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: playerMessage.content },
+      { role: "assistant", content: `[Compel proposto: ${compel.complication}]` },
+      { role: "user", content: compelContext },
+    ];
+
+    // 5. Streaming
+    const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
+    let pendingBuffer = "";
+    let fullText = "";
+    let lastFlushAt = Date.now();
+
+    for await (const event of parseStreamingResponse(streamBody)) {
+      if (event.type === "text_delta") {
+        pendingBuffer += event.delta;
+        fullText += event.delta;
+        const now = Date.now();
+        if (pendingBuffer.length >= FLUSH_CHAR_THRESHOLD || now - lastFlushAt >= FLUSH_MS_THRESHOLD) {
+          await ctx.runMutation(api.messages.appendMessageTokens, {
+            messageId: args.gmMessageId,
+            tokens: pendingBuffer,
+          });
+          pendingBuffer = "";
+          lastFlushAt = Date.now();
+        }
+      }
+    }
+
+    if (pendingBuffer.length > 0) {
+      await ctx.runMutation(api.messages.appendMessageTokens, {
+        messageId: args.gmMessageId,
+        tokens: pendingBuffer,
+      });
+    }
+
+    // 6. Persistir conteúdo final
+    await ctx.runMutation(internal.lib.messageState.updateGmMessageContent, {
+      messageId: args.gmMessageId,
+      content: fullText,
+    });
+
+    // 7. AntiLeak + extração de fatos + finalização
+    const antiLeakEnabled = args.antiLeakValidationEnabled === true;
+    if (!antiLeakEnabled) {
+      await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+        gmMessageId: args.gmMessageId,
+        triggersFired: [],
+        factsRevealed: [],
+      });
+      return { success: true, messageId: args.gmMessageId };
+    }
+
+    const leakResult = await ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
+      messageId: args.gmMessageId,
+      campaignId: compel.campaignId,
+      hiddenFacts: [],
+      apiKey: openRouterApiKey,
+    });
+
+    if (!leakResult.vazou) {
+      try {
+        await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+          messageId: args.gmMessageId,
+          campaignId: compel.campaignId,
+          apiKey: openRouterApiKey,
+        });
+      } catch {
+        await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
+          messageId: args.gmMessageId,
+          status: "failed",
+        });
+        return { success: false, reason: "fact_extraction_failed" };
+      }
+
+      await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
+        gmMessageId: args.gmMessageId,
+        triggersFired: [],
+        factsRevealed: [],
+      });
+      return { success: true, messageId: args.gmMessageId };
+    }
+
+    await ctx.runMutation(internal.lib.messageState.markMessageStatus, {
+      messageId: args.gmMessageId,
+      status: "failed",
+    });
+    return { success: false, reason: "anti_leak_failed" };
   },
 });

@@ -237,12 +237,12 @@ A task da Fase 3 pediu adicionar `setupStatus` em `campaigns`. Confirmar que é 
 
 Existem dois arquivos: `convex/processTurn.ts` (versão antiga, simples) e `convex/processTurnFull.ts` (versão dos 8 estágios). Manter os dois é fonte de confusão.
 
-- [ ] Auditar quais helpers de `processTurn.ts` ainda são usados (`markMessageStatus`, `updateGmMessageContent`)
-- [ ] Mover esses helpers para `processTurnFull.ts` ou para `convex/lib/messageState.ts`
-- [ ] Atualizar todos os imports
-- [ ] Deletar `convex/processTurn.ts` e `convex/processTurn.test.ts` (ou renomear teste para apontar pra nova localização)
-- [ ] Renomear `processTurnFull.ts` → `processTurn.ts` (nome canônico)
-- [ ] Confirmar que `npm test` continua passando
+- [x] Auditar quais helpers de `processTurn.ts` ainda são usados (`markMessageStatus`, `updateGmMessageContent`)
+- [x] Mover esses helpers para `processTurnFull.ts` ou para `convex/lib/messageState.ts`
+- [x] Atualizar todos os imports
+- [x] Deletar `convex/processTurn.ts` e `convex/processTurn.test.ts` (ou renomear teste para apontar pra nova localização)
+- [x] Renomear `processTurnFull.ts` → `processTurn.ts` (nome canônico)
+- [x] Confirmar que `npm test` continua passando
 
 ### Logging Estruturado — G-118
 
