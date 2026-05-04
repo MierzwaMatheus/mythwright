@@ -167,12 +167,12 @@ O loop em `processTurnFull` itera enquanto o stream produz `tool_call` events. S
 
 OpenAI/OpenRouter tool calling exige um padrão específico: após executar a tool, reenviar todo o histórico ao LLM **incluindo** a mensagem `assistant` com `tool_calls` e a mensagem `tool` com `content` do resultado, então o LLM continua a narrativa. O loop atual em `processTurnFull` apenas registra a tool call mas não reenvia ao LLM o resultado para que ele continue a narrativa após a tool. Verificar se esse fluxo está correto.
 
-- [ ] Auditar `processTurnFull.ts:176-249`: confirmar se há um segundo `callLlm` com histórico atualizado após tool execution, ou se o stream original continua naturalmente após o tool_call delta
-- [ ] Se faltar: implementar continuação — após executar tool e ter `toolResult`, fazer `callLlm` adicional com:
+- [x] Auditar `processTurnFull.ts:176-249`: confirmar se há um segundo `callLlm` com histórico atualizado após tool execution, ou se o stream original continua naturalmente após o tool_call delta
+- [x] Se faltar: implementar continuação — após executar tool e ter `toolResult`, fazer `callLlm` adicional com:
   ```
   [...llmMessages, { role: "assistant", tool_calls: [...] }, { role: "tool", tool_call_id, content: JSON.stringify(toolResult) }]
   ```
-- [ ] Testar fluxo: GM rola dado → tool executa → GM continua narrativa descrevendo o resultado
+- [x] Testar fluxo: GM rola dado → tool executa → GM continua narrativa descrevendo o resultado
 
 ### Tool Call Mal-formado — G-113
 

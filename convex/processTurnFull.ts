@@ -71,7 +71,7 @@ async function* parseStreamingResponse(
 }
 
 async function callLlm(
-  messages: Array<{ role: string; content: string }>,
+  messages: Array<Record<string, unknown>>,
   model: string,
   apiKey: string,
   tools?: unknown[]
@@ -290,96 +290,138 @@ export const processTurnFull = internalAction({
         }
       );
 
-      // Streaming
-      const streamBody = await callLlm(llmMessages, llmConfig.narrativeModel, openRouterApiKey);
-
+      // Streaming com loop de re-prompt após tool calls
       let pendingBuffer = "";
       let fullText = "";
       let lastFlushAt = Date.now();
       const accumulatedToolCalls: ToolCallRecord[] = [];
       let toolCallCount = 0;
+      const currentMessages: Array<Record<string, unknown>> = [...llmMessages];
 
-      for await (const event of parseStreamingResponse(streamBody)) {
-        if (event.type === "text_delta") {
-          pendingBuffer += event.delta;
-          fullText += event.delta;
-          const now = Date.now();
-          const shouldFlush =
-            pendingBuffer.length >= FLUSH_CHAR_THRESHOLD ||
-            now - lastFlushAt >= FLUSH_MS_THRESHOLD;
-          if (shouldFlush) {
-            await ctx.runMutation(api.messages.appendMessageTokens, {
-              messageId: gmMessageId,
-              tokens: pendingBuffer,
-            });
-            pendingBuffer = "";
-            lastFlushAt = Date.now();
-          }
-        } else if (event.type === "tool_call") {
-          toolCallCount += 1;
-          if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
-            await ctx.runMutation(internal.processTurn.markMessageStatus, {
-              messageId: gmMessageId,
-              status: "failed",
-            });
-            return { success: false, reason: "tool_call_limit_exceeded" };
-          }
-          if (pendingBuffer.length > 0) {
-            await ctx.runMutation(api.messages.appendMessageTokens, {
-              messageId: gmMessageId,
-              tokens: pendingBuffer,
-            });
-            pendingBuffer = "";
-            lastFlushAt = Date.now();
-          }
+      while (true) {
+        const streamBody = await callLlm(currentMessages, llmConfig.narrativeModel, openRouterApiKey);
 
-          if (event.toolName === "compel_aspect") {
-            const params = event.toolParams as {
-              aspectId: Id<"sceneAspects">;
-              characterId: Id<"characters">;
-              complication: string;
-            };
-            const compelId: Id<"compels"> = await ctx.runMutation(
-              internal.compels.beginCompelInternal,
-              {
-                campaignId: args.campaignId,
-                aspectId: params.aspectId,
-                characterId: params.characterId,
-                complication: params.complication,
-                triggeringMessageId: args.playerMessageId,
-                pausedGmMessageId: gmMessageId,
-              }
-            );
-            await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
-              messageId: gmMessageId,
-              content: fullText,
-              toolCalls: accumulatedToolCalls,
-            });
-            return {
-              status: "awaiting_player_decision",
-              compelId,
-              messageId: gmMessageId,
-            };
-          } else {
-            const toolResult = await ctx.runMutation(
-              internal.tools.executor.executeFateTool,
-              {
+        const pendingToolCallsThisPass: Array<{
+          toolName: string;
+          toolParams: unknown;
+          toolCallId: string;
+          toolResult: unknown;
+        }> = [];
+        let textThisPass = "";
+
+        for await (const event of parseStreamingResponse(streamBody)) {
+          if (event.type === "text_delta") {
+            pendingBuffer += event.delta;
+            fullText += event.delta;
+            textThisPass += event.delta;
+            const now = Date.now();
+            const shouldFlush =
+              pendingBuffer.length >= FLUSH_CHAR_THRESHOLD ||
+              now - lastFlushAt >= FLUSH_MS_THRESHOLD;
+            if (shouldFlush) {
+              await ctx.runMutation(api.messages.appendMessageTokens, {
+                messageId: gmMessageId,
+                tokens: pendingBuffer,
+              });
+              pendingBuffer = "";
+              lastFlushAt = Date.now();
+            }
+          } else if (event.type === "tool_call") {
+            toolCallCount += 1;
+            if (toolCallCount > MAX_TOOL_CALLS_PER_TURN) {
+              await ctx.runMutation(internal.processTurn.markMessageStatus, {
+                messageId: gmMessageId,
+                status: "failed",
+              });
+              return { success: false, reason: "tool_call_limit_exceeded" };
+            }
+            if (pendingBuffer.length > 0) {
+              await ctx.runMutation(api.messages.appendMessageTokens, {
+                messageId: gmMessageId,
+                tokens: pendingBuffer,
+              });
+              pendingBuffer = "";
+              lastFlushAt = Date.now();
+            }
+
+            if (event.toolName === "compel_aspect") {
+              const params = event.toolParams as {
+                aspectId: Id<"sceneAspects">;
+                characterId: Id<"characters">;
+                complication: string;
+              };
+              const compelId: Id<"compels"> = await ctx.runMutation(
+                internal.compels.beginCompelInternal,
+                {
+                  campaignId: args.campaignId,
+                  aspectId: params.aspectId,
+                  characterId: params.characterId,
+                  complication: params.complication,
+                  triggeringMessageId: args.playerMessageId,
+                  pausedGmMessageId: gmMessageId,
+                }
+              );
+              await ctx.runMutation(internal.processTurn.updateGmMessageContent, {
+                messageId: gmMessageId,
+                content: fullText,
+                toolCalls: accumulatedToolCalls,
+              });
+              return {
+                status: "awaiting_player_decision",
+                compelId,
+                messageId: gmMessageId,
+              };
+            } else {
+              const toolResult = await ctx.runMutation(
+                internal.tools.executor.executeFateTool,
+                {
+                  toolName: event.toolName,
+                  toolParams: event.toolParams,
+                  context: {
+                    campaignId: args.campaignId,
+                    messageId: gmMessageId,
+                    sceneId: (activeScene?._id ?? "") as Id<"scenes">,
+                  },
+                }
+              );
+              accumulatedToolCalls.push({
                 toolName: event.toolName,
                 toolParams: event.toolParams,
-                context: {
-                  campaignId: args.campaignId,
-                  messageId: gmMessageId,
-                  sceneId: (activeScene?._id ?? "") as Id<"scenes">,
-                },
-              }
-            );
-            accumulatedToolCalls.push({
-              toolName: event.toolName,
-              toolParams: event.toolParams,
-              toolResult,
-              executedAt: Date.now(),
-            });
+                toolResult,
+                executedAt: Date.now(),
+              });
+              pendingToolCallsThisPass.push({
+                toolName: event.toolName,
+                toolParams: event.toolParams,
+                toolCallId: event.toolCallId || `tc_${toolCallCount}`,
+                toolResult,
+              });
+            }
           }
+        }
+
+        // Sem tools nesta passagem → LLM terminou
+        if (pendingToolCallsThisPass.length === 0) break;
+
+        // Re-prompt: adiciona mensagem assistant com tool_calls + mensagens tool com resultados
+        currentMessages.push({
+          role: "assistant",
+          content: textThisPass || null,
+          tool_calls: pendingToolCallsThisPass.map((tc) => ({
+            id: tc.toolCallId,
+            type: "function",
+            function: {
+              name: tc.toolName,
+              arguments: JSON.stringify(tc.toolParams),
+            },
+          })),
+        });
+        for (const tc of pendingToolCallsThisPass) {
+          currentMessages.push({
+            role: "tool",
+            tool_call_id: tc.toolCallId,
+            content: JSON.stringify(tc.toolResult),
+          });
         }
       }
 
