@@ -374,6 +374,18 @@ export const processTurnFull = internalAction({
       // AntiLeak
       const antiLeakEnabled = args.antiLeakValidationEnabled !== false;
       if (!antiLeakEnabled) {
+        try {
+          await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+            messageId: gmMessageId,
+            campaignId: args.campaignId,
+          });
+        } catch {
+          await ctx.runMutation(internal.processTurn.markMessageStatus, {
+            messageId: gmMessageId,
+            status: "failed",
+          });
+          return { success: false, reason: "fact_extraction_failed" };
+        }
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {
           gmMessageId,
           triggersFired,
@@ -403,29 +415,28 @@ export const processTurnFull = internalAction({
         .filter((d): d is NonNullable<typeof d> => d !== null && d.visibility === "hidden")
         .map((d) => ({ id: d._id as string, content: d.content }));
 
-      const leakResult = await ctx.runAction(
-        internal.prompts.antiLeak.validateAntiLeak,
-        {
+      // --- ESTÁGIOS 5 e 6 em paralelo ---
+      const [leakResult, factExtractionError] = await Promise.all([
+        ctx.runAction(internal.prompts.antiLeak.validateAntiLeak, {
           messageId: gmMessageId,
           campaignId: args.campaignId,
           hiddenFacts,
-        }
-      );
+        }),
+        ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
+          messageId: gmMessageId,
+          campaignId: args.campaignId,
+        }).then(() => null).catch((e: unknown) => e),
+      ]);
+
+      if (factExtractionError !== null && !leakResult.vazou) {
+        await ctx.runMutation(internal.processTurn.markMessageStatus, {
+          messageId: gmMessageId,
+          status: "failed",
+        });
+        return { success: false, reason: "fact_extraction_failed" };
+      }
 
       if (!leakResult.vazou) {
-        // Estágio 6: extrair fatos
-        try {
-          await ctx.runAction(internal.prompts.factExtraction.extractAndPersistFacts, {
-            messageId: gmMessageId,
-            campaignId: args.campaignId,
-          });
-        } catch {
-          await ctx.runMutation(internal.processTurn.markMessageStatus, {
-            messageId: gmMessageId,
-            status: "failed",
-          });
-          return { success: false, reason: "fact_extraction_failed" };
-        }
 
         // Estágio 7: housekeeping
         await ctx.runMutation(internal.messages.finalizeTurnMessageInternal, {

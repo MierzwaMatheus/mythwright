@@ -759,3 +759,149 @@ describe("processTurnFull (G-104 — anti-leak com hidden facts)", () => {
     });
   });
 });
+
+describe("processTurnFull (G-105 — paralelismo estágios 5 e 6)", () => {
+  beforeEach(() => { vi.stubEnv("TOGETHER_API_KEY", "test-key"); });
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+
+  async function setupBasic(t: ReturnType<typeof convexTest>) {
+    return t.run(async (ctx) => {
+      const userId = await ctx.db.insert("users", {
+        email: "g105@test.com",
+        displayName: "G105 Tester",
+        tokenIdentifier: "token|g105-" + Math.random(),
+      });
+      const campaignId = await ctx.db.insert("campaigns", {
+        userId,
+        name: "G105 Campaign",
+        premise: "Uma aventura.",
+        tone: "dark",
+        expectedDuration: "one-shot",
+        status: "active",
+        createdAt: Date.now(),
+        lastActivityAt: Date.now(),
+      });
+      const sceneId = await ctx.db.insert("scenes", {
+        campaignId,
+        title: "Cena",
+        description: "Desc",
+        status: "active",
+        createdAt: Date.now(),
+      });
+      const playerMessageId = await ctx.db.insert("messages", {
+        campaignId,
+        role: "player",
+        content: "Ação do jogador.",
+        clientMessageId: "player-g105-" + Math.random(),
+        status: "complete",
+        createdAt: Date.now(),
+      });
+      return { campaignId, playerMessageId };
+    });
+  }
+
+  it("G-105a: antiLeak e extractFacts executam concorrentemente (mock counter)", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupBasic(t);
+
+    const callOrder: string[] = [];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("trechos")) {
+        callOrder.push("antiLeak");
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+          }),
+        };
+      }
+      callOrder.push("factExtraction");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: true,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    // Ambos devem ter sido chamados
+    expect(callOrder).toContain("antiLeak");
+    expect(callOrder).toContain("factExtraction");
+  });
+
+  it("G-105b: antiLeakEnabled=false executa apenas extractAndPersistFacts", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId, playerMessageId } = await setupBasic(t);
+
+    const callOrder: string[] = [];
+
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(async (url: string, opts: any) => {
+      if (typeof url === "string" && url.includes("together")) {
+        return makeEmbeddingResponse();
+      }
+      const body = opts?.body ? JSON.parse(opts.body) : {};
+      if (body.stream === true) {
+        return { ok: true, body: makeSseStream(["Resposta do GM."]) };
+      }
+      const prompt = JSON.stringify(body.messages ?? []);
+      if (prompt.includes("vazou") || prompt.includes("trechos")) {
+        callOrder.push("antiLeak");
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ vazou: false, facts: [], trechos: [] }) } }],
+          }),
+        };
+      }
+      if (prompt.includes("ativados") || prompt.includes("gatilhos")) {
+        return {
+          ok: true,
+          json: async () => ({
+            choices: [{ message: { content: JSON.stringify({ ativados: [], raciocinio: "" }) } }],
+          }),
+        };
+      }
+      callOrder.push("factExtraction");
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ message: { content: JSON.stringify({ facts: [] }) } }],
+        }),
+      };
+    }));
+
+    const result = await t.action(internal.processTurnFull.processTurnFull, {
+      campaignId,
+      playerMessageId,
+      antiLeakValidationEnabled: false,
+    });
+
+    expect(result).toMatchObject({ success: true });
+    expect(callOrder).not.toContain("antiLeak");
+    expect(callOrder).toContain("factExtraction");
+  });
+});

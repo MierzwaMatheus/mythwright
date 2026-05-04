@@ -76,10 +76,10 @@ Hoje `processTurnFull.ts:163-166` envia ao LLM apenas `[system, user]` — sem h
 
 Hoje no `processTurnFull.ts:278-300`, o anti-leak roda primeiro e só depois o `extractAndPersistFacts`. PRD prevê os dois em paralelo para reduzir latência (~1-2s por turno).
 
-- [ ] Refatorar para `Promise.all([validateAntiLeak(...), extractAndPersistFacts(...)])` quando `antiLeakEnabled === true`
-- [ ] Tratar caso onde `validateAntiLeak` detecta vazamento mas `extractAndPersistFacts` já persistiu fatos: não há corrupção (fatos extraídos da mensagem vazada permanecem válidos como conhecimento do mundo)
-- [ ] Quando `antiLeakEnabled === false`, manter apenas `extractAndPersistFacts`
-- [ ] Testar que ambas as actions executam concorrentemente (verificar via timing ou mock counter)
+- [x] Refatorar para `Promise.all([validateAntiLeak(...), extractAndPersistFacts(...)])` quando `antiLeakEnabled === true`
+- [x] Tratar caso onde `validateAntiLeak` detecta vazamento mas `extractAndPersistFacts` já persistiu fatos: não há corrupção (fatos extraídos da mensagem vazada permanecem válidos como conhecimento do mundo)
+- [x] Quando `antiLeakEnabled === false`, manter apenas `extractAndPersistFacts`
+- [x] Testar que ambas as actions executam concorrentemente (verificar via timing ou mock counter)
 
 ---
 
