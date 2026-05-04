@@ -9,11 +9,11 @@ export type LlmConfig = {
   embeddingModel: string;
 };
 
-const DEFAULT_LLM_CONFIG: LlmConfig = {
-  narrativeModel: "deepseek/deepseek-chat-v3-0324",
+export const DEFAULTS: LlmConfig = {
+  narrativeModel: "deepseek/deepseek-chat",
   utilityModel: "meta-llama/llama-3.1-8b-instruct",
-  extractionModel: "meta-llama/llama-3.1-8b-instruct",
-  embeddingModel: "baai/bge-m3",
+  extractionModel: "qwen/qwen-2.5-32b-instruct",
+  embeddingModel: "BAAI/bge-m3",
 };
 
 export async function getLlmConfig(
@@ -24,10 +24,7 @@ export async function getLlmConfig(
   if (!campaign) {
     throw new Error(`Campaign ${campaignId} not found`);
   }
-  if (!campaign.llmConfig) {
-    return { ...DEFAULT_LLM_CONFIG };
-  }
-  return { ...campaign.llmConfig };
+  return { ...DEFAULTS, ...campaign.llmConfig };
 }
 
 export const getLlmConfigInternal = internalQuery({

@@ -116,9 +116,9 @@ Todas as chamadas LLM hoje usam `process.env.OPENROUTER_API_KEY` (variável glob
 
 `lib/llmConfig.ts` foi criado, mas precisa garantir que defaults open-source são sempre aplicados quando faltam campos parciais (ex: campanha tem `narrativeModel` definido mas não `utilityModel`).
 
-- [ ] Refatorar `getLlmConfig` para fazer merge profundo: `{ ...DEFAULTS, ...campaign.llmConfig }` em vez de retornar tudo-ou-nada
-- [ ] Definir `DEFAULTS` no topo do arquivo: `narrativeModel: "deepseek/deepseek-chat"`, `utilityModel: "meta-llama/llama-3.1-8b-instruct"`, `extractionModel: "qwen/qwen-2.5-32b-instruct"`, `embeddingModel: "BAAI/bge-m3"`
-- [ ] Testar que campanha com `llmConfig: { narrativeModel: "x" }` retorna `{ narrativeModel: "x", utilityModel: DEFAULTS.utilityModel, ... }`
+- [x] Refatorar `getLlmConfig` para fazer merge profundo: `{ ...DEFAULTS, ...campaign.llmConfig }` em vez de retornar tudo-ou-nada
+- [x] Definir `DEFAULTS` no topo do arquivo: `narrativeModel: "deepseek/deepseek-chat"`, `utilityModel: "meta-llama/llama-3.1-8b-instruct"`, `extractionModel: "qwen/qwen-2.5-32b-instruct"`, `embeddingModel: "BAAI/bge-m3"`
+- [x] Testar que campanha com `llmConfig: { narrativeModel: "x" }` retorna `{ narrativeModel: "x", utilityModel: DEFAULTS.utilityModel, ... }`
 
 ---
 

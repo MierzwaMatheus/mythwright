@@ -35,10 +35,10 @@ describe("getLlmConfig", () => {
       return await getLlmConfig(ctx, campaignId);
     });
 
-    expect(config.narrativeModel).toBe("deepseek/deepseek-chat-v3-0324");
+    expect(config.narrativeModel).toBe("deepseek/deepseek-chat");
     expect(config.utilityModel).toBe("meta-llama/llama-3.1-8b-instruct");
-    expect(config.extractionModel).toBe("meta-llama/llama-3.1-8b-instruct");
-    expect(config.embeddingModel).toBe("baai/bge-m3");
+    expect(config.extractionModel).toBe("qwen/qwen-2.5-32b-instruct");
+    expect(config.embeddingModel).toBe("BAAI/bge-m3");
   });
 
   it("merge com defaults preserva campos nao sobrescritos", async () => {
@@ -54,8 +54,8 @@ describe("getLlmConfig", () => {
         llmConfig: {
           narrativeModel: "openai/gpt-4o",
           utilityModel: "meta-llama/llama-3.1-8b-instruct",
-          extractionModel: "meta-llama/llama-3.1-8b-instruct",
-          embeddingModel: "baai/bge-m3",
+          extractionModel: "qwen/qwen-2.5-32b-instruct",
+          embeddingModel: "BAAI/bge-m3",
         },
       });
     });
@@ -69,8 +69,30 @@ describe("getLlmConfig", () => {
     expect(config.narrativeModel).toBe("openai/gpt-4o");
     // os outros nao foram alterados, devem retornar os defaults
     expect(config.utilityModel).toBe("meta-llama/llama-3.1-8b-instruct");
-    expect(config.extractionModel).toBe("meta-llama/llama-3.1-8b-instruct");
-    expect(config.embeddingModel).toBe("baai/bge-m3");
+    expect(config.extractionModel).toBe("qwen/qwen-2.5-32b-instruct");
+    expect(config.embeddingModel).toBe("BAAI/bge-m3");
+  });
+
+  it("merge: campo ausente na campaign usa default", async () => {
+    const t = convexTest(schema, modules);
+    const { campaignId } = await setupUserAndCampaign(t, "token|llm004", "llm004@test.com");
+
+    // Patch with partial config (only narrativeModel)
+    await t.run(async (ctx) => {
+      await ctx.db.patch(campaignId, {
+        llmConfig: { narrativeModel: "custom/model" },
+      });
+    });
+
+    const config = await t.run(async (ctx) => {
+      const { getLlmConfig } = await import("./lib/llmConfig");
+      return await getLlmConfig(ctx, campaignId);
+    });
+
+    expect(config.narrativeModel).toBe("custom/model");
+    expect(config.utilityModel).toBe("meta-llama/llama-3.1-8b-instruct");
+    expect(config.extractionModel).toBe("qwen/qwen-2.5-32b-instruct");
+    expect(config.embeddingModel).toBe("BAAI/bge-m3");
   });
 
   it("respeita override por campanha quando llmConfig presente", async () => {

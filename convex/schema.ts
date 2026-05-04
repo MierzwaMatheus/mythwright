@@ -27,10 +27,10 @@ export default defineSchema({
     cheatModeEnabled: v.optional(v.boolean()),
     antiLeakValidationEnabled: v.optional(v.boolean()),
     llmConfig: v.optional(v.object({
-      narrativeModel: v.string(),
-      utilityModel: v.string(),
-      extractionModel: v.string(),
-      embeddingModel: v.string(),
+      narrativeModel: v.optional(v.string()),
+      utilityModel: v.optional(v.string()),
+      extractionModel: v.optional(v.string()),
+      embeddingModel: v.optional(v.string()),
     })),
     currentSceneId: v.optional(v.id("scenes")),
   }).index("by_user", ["userId"])
