@@ -142,6 +142,23 @@ export const getByIdInternal = internalQuery({
   },
 });
 
+export const validateOwnership = internalQuery({
+  args: { campaignId: v.id("campaigns"), tokenIdentifier: v.string() },
+  handler: async (ctx, args) => {
+    const user = await ctx.db
+      .query("users")
+      .withIndex("by_token", (q) => q.eq("tokenIdentifier", args.tokenIdentifier))
+      .unique();
+    if (!user) throw new ConvexError("Not authenticated");
+
+    const campaign = await ctx.db.get(args.campaignId);
+    if (!campaign) throw new ConvexError("Campaign not found");
+    if (campaign.userId !== user._id) throw new ConvexError("not_owner");
+
+    return campaign;
+  },
+});
+
 export const listCampaigns = query({
   args: {},
   handler: async (ctx) => {

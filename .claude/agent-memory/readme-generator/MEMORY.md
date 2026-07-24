@@ -1,0 +1,1 @@
+- [Mythwright — visão geral do projeto](project_mythwright.md) — stack, propósito, modelos LLM e terminologia que não deve ser traduzida
